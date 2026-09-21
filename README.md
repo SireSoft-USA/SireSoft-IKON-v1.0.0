@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://www.siresoft.net/" target="_blank">
-    <img src="https://avatars.githubusercontent.com/u/312466719?v=4" width="150" alt="SireSoft USA Logo">
+    <img src[="https://avatars.githubusercontent.com/u/312466719?v=4](https://share.google/4qnK6v4YBqvMdNFEm)" width="150" alt="SireSoft USA Logo">
   </a>
 </p>
 
