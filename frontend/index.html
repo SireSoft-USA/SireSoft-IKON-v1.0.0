@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1"
+  >
+  <meta
+    name="description"
+    content="SireLLM — independent SireSoft assistant."
+  >
+  <meta
+    name="theme-color"
+    content="#111111"
+  >
+  <title>SireLLM | SireSoft Assistant</title>
+
+  <link
+    rel="stylesheet"
+    href="./css/app.css"
+  >
+</head>
+<body>
+  <a
+    class="skip-link"
+    href="#chat-main"
+  >
+    Skip to chat
+  </a>
+
+  <div
+    id="app"
+    class="app-shell"
+    data-app="sirellm"
+  >
+    <header
+      class="site-header"
+      data-region="header"
+    >
+      <div class="brand-block">
+        <span
+          class="brand-mark"
+          aria-hidden="true"
+        >
+          SL
+        </span>
+
+        <div>
+          <h1 class="brand-name">
+            SireLLM
+          </h1>
+          <p class="brand-subtitle">
+            Independent SireSoft Assistant
+          </p>
+        </div>
+      </div>
+
+      <div
+        class="runtime-status"
+        aria-live="polite"
+      >
+        <span
+          id="status-indicator"
+          class="status-dot"
+          aria-hidden="true"
+        ></span>
+        <span id="status-text">
+          Connecting
+        </span>
+      </div>
+    </header>
+
+    <main
+      id="chat-main"
+      class="chat-layout"
+    >
+      <aside
+        class="sidebar"
+        aria-label="Conversation controls"
+      >
+        <section
+          class="sidebar-card"
+          aria-labelledby="session-heading"
+        >
+          <div class="section-heading-row">
+            <h2 id="session-heading">
+              Conversation
+            </h2>
+
+            <button
+              id="new-chat-button"
+              class="button button-secondary"
+              type="button"
+            >
+              New chat
+            </button>
+          </div>
+
+          <dl class="session-meta">
+            <div>
+              <dt>Session</dt>
+              <dd id="session-id">
+                Not started
+              </dd>
+            </div>
+
+            <div>
+              <dt>Grounding</dt>
+              <dd id="grounding-status">
+                SireSoft RAG
+              </dd>
+            </div>
+          </dl>
+        </section>
+
+        <section
+          class="sidebar-card"
+          aria-labelledby="system-heading"
+        >
+          <h2 id="system-heading">
+            System
+          </h2>
+
+          <ul class="system-list">
+            <li>
+              Local model inference
+            </li>
+            <li>
+              SireSoft retrieval
+            </li>
+            <li>
+              Input/context/output guardrails
+            </li>
+            <li>
+              No external LLM API
+            </li>
+          </ul>
+        </section>
+      </aside>
+
+      <section
+        class="chat-panel"
+        aria-labelledby="chat-heading"
+      >
+        <div class="chat-panel-header">
+          <div>
+            <p class="eyebrow">
+              SireSoft knowledge assistant
+            </p>
+            <h2 id="chat-heading">
+              Ask SireLLM
+            </h2>
+          </div>
+
+          <button
+            id="clear-chat-button"
+            class="button button-ghost"
+            type="button"
+          >
+            Clear
+          </button>
+        </div>
+
+        <div
+          id="message-list"
+          class="message-list"
+          role="log"
+          aria-live="polite"
+          aria-relevant="additions"
+          aria-label="Conversation"
+        >
+          <article
+            class="message message-assistant"
+            data-role="assistant"
+          >
+            <div
+              class="message-avatar"
+              aria-hidden="true"
+            >
+              SL
+            </div>
+
+            <div class="message-content">
+              <p>
+                SireLLM is ready to answer questions using the
+                configured SireSoft knowledge and local model stack.
+              </p>
+            </div>
+          </article>
+        </div>
+
+        <section
+          id="citation-panel"
+          class="citation-panel"
+          aria-labelledby="citation-heading"
+          hidden
+        >
+          <div class="section-heading-row">
+            <h3 id="citation-heading">
+              Sources
+            </h3>
+
+            <button
+              id="close-citations-button"
+              class="button button-ghost"
+              type="button"
+            >
+              Close
+            </button>
+          </div>
+
+          <ol
+            id="citation-list"
+            class="citation-list"
+          ></ol>
+        </section>
+
+        <form
+          id="chat-form"
+          class="composer"
+          novalidate
+        >
+          <label
+            class="sr-only"
+            for="message-input"
+          >
+            Message
+          </label>
+
+          <textarea
+            id="message-input"
+            name="message"
+            rows="3"
+            maxlength="12000"
+            autocomplete="off"
+            placeholder="Ask about SireSoft..."
+            required
+          ></textarea>
+
+          <div class="composer-footer">
+            <div
+              class="composer-status"
+              aria-live="polite"
+            >
+              <span id="token-hint">
+                Grounded answers use retrieved SireSoft context.
+              </span>
+            </div>
+
+            <button
+              id="send-button"
+              class="button button-primary"
+              type="submit"
+            >
+              Send
+            </button>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <footer
+      class="site-footer"
+      data-region="footer"
+    >
+      <p>
+        SireLLM — independent LLM + RAG system for SireSoft.
+      </p>
+
+      <p id="build-status">
+        Runtime status pending.
+      </p>
+    </footer>
+
+    <div
+      id="toast-region"
+      class="toast-region"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+    ></div>
+  </div>
+
+  <noscript>
+    <div class="noscript-message">
+      SireLLM requires JavaScript for chat interaction.
+    </div>
+  </noscript>
+
+  <script
+    type="module"
+    src="./js/app.js"
+  ></script>
+</body>
+</html>

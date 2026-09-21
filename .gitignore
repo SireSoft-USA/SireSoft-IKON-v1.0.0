@@ -1,0 +1,226 @@
+# ============================================================
+# SireLLM / Independent Chatbot
+# ============================================================
+
+
+# -------------------- Python --------------------
+
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+.pytest_cache/
+.mypy_cache/
+.pytype/
+.pyre/
+.ruff_cache/
+
+.coverage
+.coverage.*
+htmlcov/
+
+
+# -------------------- Virtual environments --------------------
+
+.venv/
+venv/
+env/
+ENV/
+
+
+# -------------------- IDE / OS --------------------
+
+.vscode/
+.idea/
+.vs/
+*.code-workspace
+
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+*.swp
+*.swo
+*~
+
+
+# -------------------- Secrets --------------------
+
+.env
+.env.*
+!.env.example
+
+*.pem
+*.key
+*.p12
+*.pfx
+*.secret
+
+credentials.json
+service-account.json
+
+
+# ============================================================
+# DATASETS — NEVER PUSH
+# ============================================================
+
+/datasets/raw/**
+/datasets/canonical/**
+/datasets/processed/**
+/datasets/preprocessed/**
+/datasets/cache/**
+/datasets/temp/**
+/datasets/tmp/**
+
+# Large dataset formats anywhere
+*.jsonl.gz
+*.json.gz
+*.parquet
+*.arrow
+*.h5
+*.hdf5
+*.npy
+*.npz
+
+# Explicit known large SireLLM files
+/datasets/raw/tinystories/TinyStories-train.txt
+/datasets/raw/movie-corpus/utterances.jsonl
+/datasets/raw/openassistant/oasst1-ready.jsonl
+/datasets/raw/openassistant/source/**
+/datasets/raw/dolly/databricks-dolly-15k.jsonl
+
+/datasets/canonical/*.jsonl
+
+
+# ============================================================
+# TRAINED MODEL / TOKENIZER — NEVER PUSH
+# ============================================================
+
+/model_store/checkpoints/**
+/model_store/manifests/**
+
+*.lbckpt
+*.sltok
+*.ckpt
+*.pth
+*.pt
+*.safetensors
+*.weights
+*.onnx
+
+
+# ============================================================
+# RAG / VECTOR INDEXES — NEVER PUSH
+# ============================================================
+
+/vector_store/indexes/**
+/vector_store/siresoft/**
+
+*.slretr
+*.index
+*.idx
+
+
+# -------------------- Training output --------------------
+
+/runs/
+/training_runs/
+/training_output/
+/training_outputs/
+/training_logs/
+/checkpoints/
+/artifacts/
+
+*.metrics
+*.history
+
+
+# -------------------- Runtime generated state --------------------
+
+/runtime/state/**
+/runtime/cache/**
+/runtime/logs/**
+/runtime/tmp/**
+/runtime/pids/**
+/runtime/sockets/**
+
+/service_state/
+/service_logs/
+/service_cache/
+
+*.pid
+*.sock
+*.socket
+*.port
+
+*.sllmcfg
+*.sllmaud
+
+
+# -------------------- Logs / temporary --------------------
+
+*.log
+*.tmp
+*.temp
+*.bak
+*.old
+
+/cache/
+/tmp/
+/temp/
+/.cache/
+
+
+# -------------------- Frontend generated --------------------
+
+node_modules/
+frontend/node_modules/
+
+dist/
+.dist/
+frontend/dist/
+
+build/
+frontend/build/
+
+.next/
+.vite/
+frontend/.vite/
+frontend/.cache/
+
+
+# -------------------- Package manager caches --------------------
+
+.npm/
+.yarn/
+.pnpm-store/
+
+
+# -------------------- Test output --------------------
+
+tests/tmp/
+tests/temp/
+tests/output/
+test_output/
+test_outputs/
+
+
+# -------------------- Archives / generated bundles --------------------
+
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.gz
+*.tgz
+
+
+# -------------------- Local development --------------------
+
+.local/
+local/
+debug/
+scratch/
+sandbox/
