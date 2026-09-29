@@ -61,45 +61,12 @@ Desktop.ini
 credentials.json
 service-account.json
 
-
 # ============================================================
-# DATASETS — NEVER PUSH
-# ============================================================
-
-/datasets/raw/**
-/datasets/canonical/**
-/datasets/processed/**
-/datasets/preprocessed/**
-/datasets/cache/**
-/datasets/temp/**
-/datasets/tmp/**
-
-# Large dataset formats anywhere
-*.jsonl.gz
-*.json.gz
-*.parquet
-*.arrow
-*.h5
-*.hdf5
-*.npy
-*.npz
-
-# Explicit known large SireLLM files
-/datasets/raw/tinystories/TinyStories-train.txt
-/datasets/raw/movie-corpus/utterances.jsonl
-/datasets/raw/openassistant/oasst1-ready.jsonl
-/datasets/raw/openassistant/source/**
-/datasets/raw/dolly/databricks-dolly-15k.jsonl
-
-/datasets/canonical/*.jsonl
-
-
-# ============================================================
-# TRAINED MODEL / TOKENIZER — NEVER PUSH
+# TRAINED MODEL / TOKENIZER ARTIFACTS — DO NOT PUSH
 # ============================================================
 
-/model_store/checkpoints/**
-/model_store/manifests/**
+# Keep Python/code files inside model_store.
+# Ignore only generated trained artifacts.
 
 *.lbckpt
 *.sltok
@@ -112,11 +79,11 @@ service-account.json
 
 
 # ============================================================
-# RAG / VECTOR INDEXES — NEVER PUSH
+# RAG / VECTOR INDEX ARTIFACTS — DO NOT PUSH
 # ============================================================
 
-/vector_store/indexes/**
-/vector_store/siresoft/**
+# Keep source/code files inside vector_store.
+# Ignore only generated index artifacts.
 
 *.slretr
 *.index
@@ -224,3 +191,6 @@ local/
 debug/
 scratch/
 sandbox/
+
+# Original TinyStories canonical file exceeds GitHub LFS per-file limit
+datasets/canonical/tinystories.jsonl
