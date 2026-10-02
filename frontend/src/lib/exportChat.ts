@@ -2,7 +2,7 @@ import type { Conversation } from '../types/chat'
 
 export function conversationToMarkdown(conversation: Conversation) {
   const body = conversation.messages
-    .map((message) => `## ${message.role === 'user' ? 'You' : 'SireLLM'}\n\n${message.content.trim()}`)
+    .map((message) => `## ${message.role === 'user' ? 'You' : 'SireSoft-IKON-v1.0'}\n\n${message.content.trim()}`)
     .join('\n\n---\n\n')
 
   return `# ${conversation.title}\n\n${body}\n`
@@ -10,7 +10,7 @@ export function conversationToMarkdown(conversation: Conversation) {
 
 export function conversationToText(conversation: Conversation) {
   return conversation.messages
-    .map((message) => `${message.role === 'user' ? 'You' : 'SireLLM'}:\n${message.content.trim()}`)
+    .map((message) => `${message.role === 'user' ? 'You' : 'SireSoft-IKON-v1.0'}:\n${message.content.trim()}`)
     .join('\n\n')
 }
 

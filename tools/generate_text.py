@@ -10,7 +10,7 @@ from real_runtime import (
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Load a trained SireLLM checkpoint and perform real autoregressive generation."
+            "Load a trained SireSoft-IKON-v1.0 checkpoint and perform real autoregressive generation."
         )
     )
     parser.add_argument(

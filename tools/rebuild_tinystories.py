@@ -29,18 +29,18 @@ def rebuild(parts_dir: Path, output: Path, force: bool = False) -> None:
         )
 
     if output.exists() and not force:
-        print("[SireLLM] TinyStories canonical file already exists:")
+        print("[SireSoft-IKON-v1.0] TinyStories canonical file already exists:")
         print(f"  {output}")
         print(f"  Size: {human_size(output.stat().st_size)}")
-        print("[SireLLM] Nothing to rebuild.")
-        print("[SireLLM] Use --force only if you intentionally want to rebuild it.")
+        print("[SireSoft-IKON-v1.0] Nothing to rebuild.")
+        print("[SireSoft-IKON-v1.0] Use --force only if you intentionally want to rebuild it.")
         return
 
     expected_size = sum(part.stat().st_size for part in parts)
 
-    print("[SireLLM] Rebuilding canonical TinyStories dataset")
-    print(f"[SireLLM] Parts found: {len(parts)}")
-    print(f"[SireLLM] Expected output size: {human_size(expected_size)}")
+    print("[SireSoft-IKON-v1.0] Rebuilding canonical TinyStories dataset")
+    print(f"[SireSoft-IKON-v1.0] Parts found: {len(parts)}")
+    print(f"[SireSoft-IKON-v1.0] Expected output size: {human_size(expected_size)}")
 
     output.parent.mkdir(parents=True, exist_ok=True)
     temp_output = output.with_suffix(output.suffix + ".rebuilding")
@@ -53,7 +53,7 @@ def rebuild(parts_dir: Path, output: Path, force: bool = False) -> None:
             for index, part in enumerate(parts, start=1):
                 part_size = part.stat().st_size
                 print(
-                    f"[SireLLM] Merging {index}/{len(parts)}: "
+                    f"[SireSoft-IKON-v1.0] Merging {index}/{len(parts)}: "
                     f"{part.name} ({human_size(part_size)})"
                 )
 
@@ -79,10 +79,10 @@ def rebuild(parts_dir: Path, output: Path, force: bool = False) -> None:
         temp_output.replace(output)
 
         print()
-        print("[SireLLM] TinyStories reconstruction complete.")
-        print(f"[SireLLM] Created: {output}")
-        print(f"[SireLLM] Final size: {human_size(output.stat().st_size)}")
-        print("[SireLLM] Dataset is ready for preprocessing/training.")
+        print("[SireSoft-IKON-v1.0] TinyStories reconstruction complete.")
+        print(f"[SireSoft-IKON-v1.0] Created: {output}")
+        print(f"[SireSoft-IKON-v1.0] Final size: {human_size(output.stat().st_size)}")
+        print("[SireSoft-IKON-v1.0] Dataset is ready for preprocessing/training.")
 
     except Exception:
         if temp_output.exists():

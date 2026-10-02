@@ -14,7 +14,7 @@ def _exec_file(namespace, relative_path):
     path = ROOT / relative_path
     if not path.is_file():
         raise FileNotFoundError(
-            "Required SireLLM source file is missing: "
+            "Required SireSoft-IKON-v1.0 source file is missing: "
             + str(relative_path)
         )
 

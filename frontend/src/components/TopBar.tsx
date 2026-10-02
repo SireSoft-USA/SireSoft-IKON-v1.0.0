@@ -16,7 +16,7 @@ export function TopBar({ onOpenSettings, onOpenMobileMenu }: { onOpenSettings: (
         </button>
         <div className="md:hidden"><Logo size="compact" /></div>
         <div className="hidden min-w-0 items-center gap-2 md:flex">
-          <span className="truncate text-sm font-semibold tracking-tight">SireLLM</span>
+          <span className="truncate text-sm font-semibold tracking-tight">SireSoft-IKON-v1.0</span>
         </div>
       </div>
 

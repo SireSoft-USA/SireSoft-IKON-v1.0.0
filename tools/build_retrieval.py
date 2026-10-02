@@ -180,7 +180,7 @@ def main():
         overlap_chars=args.overlap_chars,
     )
 
-    print("SireLLM retrieval indexing")
+    print("SireSoft-IKON-v1.0 retrieval indexing")
     print("source documents:", len(documents))
     print("dimension:", args.dimension)
     print()

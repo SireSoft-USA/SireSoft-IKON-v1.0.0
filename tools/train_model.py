@@ -183,7 +183,7 @@ def load_sequences(
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Train the real SireLLM decoder-only language model and write checkpoints."
+            "Train the real SireSoft-IKON-v1.0 decoder-only language model and write checkpoints."
         )
     )
     parser.add_argument(
@@ -423,7 +423,7 @@ def main():
         exist_ok=True,
     )
 
-    print("SireLLM REAL MODEL TRAINING")
+    print("SireSoft-IKON-v1.0 REAL MODEL TRAINING")
     print("vocab size:", tokenizer_info["vocabulary_size"])
     print("parameters:", job.model.parameter_count())
     print("train sequences:", len(train_sequences))

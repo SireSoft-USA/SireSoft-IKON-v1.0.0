@@ -28,7 +28,7 @@ FRONTEND_DIR = ROOT / "frontend"
 
 # tools/chat_rag.py imports real_runtime as a top-level module. Adding the
 # existing tools directory to sys.path lets this FastAPI bridge reuse the
-# project's existing SireLLM stack without modifying any backend source file.
+# project's existing SireSoft-IKON-v1.0 stack without modifying any backend source file.
 if str(TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(TOOLS_DIR))
 
@@ -108,7 +108,7 @@ class EmbedRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Existing SireLLM stack loader
+# Existing SireSoft-IKON-v1.0 stack loader
 # ---------------------------------------------------------------------------
 
 
@@ -171,17 +171,17 @@ def _load_sirellm_stack() -> None:
                 }
             )
 
-        print("[SireLLM] tokenizer loaded")
-        print("[SireLLM] checkpoint loaded")
-        print("[SireLLM] retrieval index loaded")
-        print("[SireLLM] RAG stack ready")
+        print("[SireSoft-IKON-v1.0] tokenizer loaded")
+        print("[SireSoft-IKON-v1.0] checkpoint loaded")
+        print("[SireSoft-IKON-v1.0] retrieval index loaded")
+        print("[SireSoft-IKON-v1.0] RAG stack ready")
 
     except Exception as error:
         with _stack_lock:
             _stack["ready"] = False
             _stack["error"] = str(error)
 
-        print("[SireLLM] model stack not ready:")
+        print("[SireSoft-IKON-v1.0] model stack not ready:")
         print(str(error))
 
     finally:
@@ -210,7 +210,7 @@ def _require_stack() -> dict[str, Any]:
     if loading:
         raise HTTPException(
             status_code=503,
-            detail="SireLLM model stack is still loading. Try again shortly.",
+            detail="SireSoft-IKON-v1.0 model stack is still loading. Try again shortly.",
         )
 
     # If the generated artifacts were added after app.py was started, retry
@@ -225,7 +225,7 @@ def _require_stack() -> dict[str, Any]:
     raise HTTPException(
         status_code=503,
         detail=(
-            "SireLLM model stack is not ready. "
+            "SireSoft-IKON-v1.0 model stack is not ready. "
             + (
                 str(error)
                 if error
@@ -282,7 +282,7 @@ def _base_prompt(messages: list[FrontendMessage]) -> str:
 
     lines = [
         "<SYSTEM>",
-        "You are SireLLM, the SireSoft AI assistant.",
+        "You are SireSoft-IKON-v1.0, the SireSoft AI assistant.",
     ]
 
     for message in messages:
@@ -393,11 +393,11 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(
-    title="SireLLM API",
+    title="SireSoft-IKON-v1.0 API",
     version="1.0.0",
     description=(
         "FastAPI bridge connecting the supplied React frontend to the existing "
-        "SireLLM inference and RAG backend."
+        "SireSoft-IKON-v1.0 inference and RAG backend."
     ),
     lifespan=lifespan,
 )
@@ -503,7 +503,7 @@ def frontend_chat_stream(request: FrontendChatRequest) -> StreamingResponse:
 
 
 # ---------------------------------------------------------------------------
-# Existing /v1 API compatibility routes retained for the SireLLM architecture
+# Existing /v1 API compatibility routes retained for the SireSoft-IKON-v1.0 architecture
 # ---------------------------------------------------------------------------
 
 
@@ -660,7 +660,7 @@ def _ensure_frontend_dependencies(npm: str) -> None:
     if (FRONTEND_DIR / "node_modules").is_dir():
         return
 
-    print("[SireLLM] frontend dependencies are missing; running npm install...")
+    print("[SireSoft-IKON-v1.0] frontend dependencies are missing; running npm install...")
     result = subprocess.run(
         [npm, "install"],
         cwd=str(FRONTEND_DIR),
@@ -680,7 +680,7 @@ def _start_frontend() -> subprocess.Popen[Any]:
     npm = _npm_executable()
     _ensure_frontend_dependencies(npm)
 
-    print("[SireLLM] starting React frontend on http://localhost:5173")
+    print("[SireSoft-IKON-v1.0] starting React frontend on http://localhost:5173")
 
     return subprocess.Popen(
         [npm, "run", "dev"],
@@ -730,9 +730,9 @@ def main() -> None:
     try:
         frontend_process = _start_frontend()
 
-        print(f"[SireLLM] starting FastAPI backend on http://{HOST}:{PORT}")
-        print("[SireLLM] frontend API: /api/chat/stream")
-        print("[SireLLM] one command now runs both frontend and backend")
+        print(f"[SireSoft-IKON-v1.0] starting FastAPI backend on http://{HOST}:{PORT}")
+        print("[SireSoft-IKON-v1.0] frontend API: /api/chat/stream")
+        print("[SireSoft-IKON-v1.0] one command now runs both frontend and backend")
 
         uvicorn.run(
             app,

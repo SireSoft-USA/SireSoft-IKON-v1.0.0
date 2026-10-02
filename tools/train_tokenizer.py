@@ -118,7 +118,7 @@ def read_corpus(
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Train SireLLM's real byte-level BPE tokenizer on canonical data."
+            "Train SireSoft-IKON-v1.0's real byte-level BPE tokenizer on canonical data."
         )
     )
     parser.add_argument(
@@ -172,7 +172,7 @@ def main():
             "No canonical training text was found."
         )
 
-    print("SireLLM tokenizer training")
+    print("SireSoft-IKON-v1.0 tokenizer training")
     print("texts:", len(corpus))
     for key in args.datasets:
         print("  ", key, counts.get(key, 0))

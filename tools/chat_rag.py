@@ -149,7 +149,7 @@ def print_result(result):
         return
 
     print()
-    print("SireLLM:")
+    print("SireSoft-IKON-v1.0:")
     print(data["answer_text"])
 
     citations = data.get(
@@ -196,7 +196,7 @@ def print_result(result):
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Run the real trained SireLLM + SireSoft RAG stack as an interactive CLI."
+            "Run the real trained SireSoft-IKON-v1.0 + SireSoft RAG stack as an interactive CLI."
         )
     )
     parser.add_argument(
@@ -280,7 +280,7 @@ def main():
         orchestrator,
     ) = build_stack(args)
 
-    print("SireLLM RAG READY")
+    print("SireSoft-IKON-v1.0 RAG READY")
     print("model:", inference.status())
     print("retrieval:", retrieval.status())
     print()
@@ -321,7 +321,7 @@ def main():
             print_result(result)
         except Exception as error:
             print(
-                "SireLLM error:",
+                "SireSoft-IKON-v1.0 error:",
                 error,
             )
 

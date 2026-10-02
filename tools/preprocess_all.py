@@ -21,7 +21,7 @@ DATASETS = (
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            "Run SireLLM's real raw -> canonical preprocessing pipeline."
+            "Run SireSoft-IKON-v1.0's real raw -> canonical preprocessing pipeline."
         )
     )
     parser.add_argument(
@@ -58,7 +58,7 @@ def main():
         exist_ok=True,
     )
 
-    print("SireLLM preprocessing")
+    print("SireSoft-IKON-v1.0 preprocessing")
     print("Project:", ROOT)
     print("Output:", output_dir)
     print()

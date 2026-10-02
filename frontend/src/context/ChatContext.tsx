@@ -155,7 +155,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
                         ...m,
                         pending: false,
                         error: !aborted,
-                        content: m.content || (aborted ? 'Generation stopped.' : 'SireLLM could not complete this response.'),
+                        content: m.content || (aborted ? 'Generation stopped.' : 'SireSoft-IKON-v1.0 could not complete this response.'),
                       }
                     : m,
                 ),

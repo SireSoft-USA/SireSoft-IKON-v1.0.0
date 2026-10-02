@@ -16,7 +16,7 @@ export function EmptyState({ onSuggestion }: { onSuggestion: (text: string) => v
           <div className="absolute h-24 w-24 rounded-full bg-blue-500/10 blur-2xl dark:bg-blue-500/15 sm:h-28 sm:w-28" />
           <Logo size="hero" className="relative drop-shadow-[0_10px_24px_rgba(20,71,255,0.18)]" />
         </div>
-        <h1 className="text-[27px] font-semibold tracking-[-0.03em] text-slate-950 dark:text-white sm:text-[32px]">How can SireLLM help?</h1>
+        <h1 className="text-[27px] font-semibold tracking-[-0.03em] text-slate-950 dark:text-white sm:text-[32px]">How can SireSoft-IKON-v1.0 help?</h1>
       </div>
 
       <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
