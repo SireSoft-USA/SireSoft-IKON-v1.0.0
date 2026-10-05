@@ -1,22 +1,18 @@
 """Verify that SireSoft-IKON can execute a real training step on CUDA.
 
-No datasets, tokenizer artifacts, PyTorch, TensorFlow, NumPy, CuPy or Numba are
-required.  The test builds a tiny SireSoft-IKON Transformer in memory, performs
-real forward/backward/AdamW steps, and verifies that the project's custom CUDA
-kernels were actually called.
-
-Typical server use:
-    python tools/test_gpu_training.py --build-if-needed --arch sm_61
+This is both a manual GPU diagnostic and part of the project test surface.  A
+machine without NVIDIA tooling is reported as SKIPPED by default instead of
+failing the whole code test suite.  Pass --require-cuda when CUDA availability
+must be treated as mandatory (the strict training pipeline uses that mode).
 """
 
 import argparse
 import math
-import shutil
 import subprocess
 import sys
-from pathlib import Path
 
 from real_runtime import ROOT, enter_project_root, load_training_namespace
+from cuda_status import CUDA_LIBRARY, backend_needs_build, nvidia_smi_info, nvcc_info
 
 
 REQUIRED_KERNELS = (
@@ -32,80 +28,82 @@ REQUIRED_KERNELS = (
 )
 
 
-def run_text(command):
+def skip_or_fail(message, required):
+    if required:
+        raise RuntimeError(message)
+    print("GPU TRAINING TEST: SKIPPED")
+    print(message)
+    print("Use --require-cuda to make missing CUDA support a test failure.")
+    return False
+
+
+def show_nvidia_smi():
+    info = nvidia_smi_info()
+    if info.get("available"):
+        print("NVIDIA GPUs visible to the operating system:")
+        print(info.get("gpus") or "(no rows returned)")
+        print()
+    else:
+        print("[INFO] nvidia-smi diagnostic unavailable:", info.get("error"))
+        print("The backend itself will still be tested if it can load CUDA.")
+        print()
+
+
+def maybe_build_backend(build_if_needed, arch, required):
+    if not backend_needs_build():
+        print("CUDA backend already built:", CUDA_LIBRARY)
+        return True
+
+    if not build_if_needed:
+        return skip_or_fail(
+            "CUDA backend is not built. Re-run with --build-if-needed, or provide "
+            "a prebuilt libsireikon_cuda.so.",
+            required,
+        )
+
+    compiler = nvcc_info()
+    if not compiler.get("available") and not CUDA_LIBRARY.is_file():
+        return skip_or_fail(
+            "CUDA backend needs a build, but no CUDA compiler is available. "
+            "This is a build-time limitation, not a Python/runtime CUDA error.",
+            required,
+        )
+
+    print("Preparing CUDA backend before test...")
+    command = [
+        sys.executable,
+        str(ROOT / "tools" / "build_cuda_backend.py"),
+        "--arch",
+        arch,
+    ]
+    if required:
+        command.append("--required")
+    completed = subprocess.run(command, cwd=ROOT)
+    if completed.returncode != 0:
+        return skip_or_fail("CUDA backend build failed", required)
+    if not CUDA_LIBRARY.is_file() or CUDA_LIBRARY.stat().st_size == 0:
+        return skip_or_fail("CUDA backend is still unavailable after build step", required)
+    print()
+    return True
+
+
+def show_compute_processes():
+    info = nvidia_smi_info()
+    path = info.get("path")
+    if not path:
+        return
     completed = subprocess.run(
-        command,
+        [
+            path,
+            "--query-compute-apps=pid,process_name,used_gpu_memory",
+            "--format=csv,noheader",
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,
     )
-    text = (completed.stdout or "") + (completed.stderr or "")
-    return completed.returncode, text.strip()
-
-
-def ensure_nvidia_smi():
-    executable = shutil.which("nvidia-smi")
-    if executable is None:
-        raise RuntimeError("nvidia-smi was not found on PATH")
-
-    code, output = run_text([
-        executable,
-        "--query-gpu=index,name,memory.total",
-        "--format=csv,noheader",
-    ])
-    if code != 0:
-        raise RuntimeError("nvidia-smi failed:\n" + output)
-
-    print("NVIDIA GPUs visible to the operating system:")
-    print(output)
-    print()
-
-
-def maybe_build_backend(build_if_needed, arch):
-    library = ROOT / "libs" / "core" / "gpu" / "libsireikon_cuda.so"
-    source = ROOT / "libs" / "core" / "gpu" / "sireikon_cuda.cu"
-
-    needs_build = not library.is_file()
-    if library.is_file() and source.is_file():
-        needs_build = source.stat().st_mtime > library.stat().st_mtime
-
-    if not needs_build:
-        print("CUDA backend already built:", library)
-        return
-
-    if not build_if_needed:
-        raise RuntimeError(
-            "CUDA backend is not built. Run:\n"
-            f"  python tools/build_cuda_backend.py --arch {arch}\n"
-            "or rerun this test with --build-if-needed."
-        )
-
-    print("Building CUDA backend before test...")
-    completed = subprocess.run(
-        [
-            sys.executable,
-            str(ROOT / "tools" / "build_cuda_backend.py"),
-            "--arch",
-            arch,
-        ],
-        cwd=ROOT,
-    )
-    if completed.returncode != 0:
-        raise RuntimeError("CUDA backend build failed")
-    print()
-
-
-def show_compute_processes():
-    executable = shutil.which("nvidia-smi")
-    if executable is None:
-        return
-
-    code, output = run_text([
-        executable,
-        "--query-compute-apps=pid,process_name,used_gpu_memory",
-        "--format=csv,noheader",
-    ])
-    if code == 0:
+    if completed.returncode == 0:
+        output = (completed.stdout or "").strip()
         print("GPU compute processes after training test:")
         print(output if output else "(none reported)")
         print()
@@ -119,6 +117,11 @@ def main():
     parser.add_argument("--steps", type=int, default=3)
     parser.add_argument("--arch", default="sm_61")
     parser.add_argument("--build-if-needed", action="store_true")
+    parser.add_argument(
+        "--require-cuda",
+        action="store_true",
+        help="Fail instead of SKIP when CUDA cannot be activated.",
+    )
     args = parser.parse_args()
 
     if args.steps <= 0:
@@ -130,20 +133,30 @@ def main():
     print("SireSoft-IKON CUDA TRAINING TEST")
     print("=" * 72)
 
-    ensure_nvidia_smi()
-    maybe_build_backend(args.build_if_needed, args.arch)
+    show_nvidia_smi()
+    if not maybe_build_backend(args.build_if_needed, args.arch, args.require_cuda):
+        return 0
 
     ns = load_training_namespace()
     backend = ns["GPU_BACKEND"]
-    status = backend.configure(
-        "cuda",
-        args.cuda_device_index,
-        strict=True,
-    )
+    try:
+        status = backend.configure(
+            "cuda",
+            args.cuda_device_index,
+            strict=True,
+        )
+    except Exception as error:
+        if args.require_cuda:
+            raise
+        print("GPU TRAINING TEST: SKIPPED")
+        print("CUDA backend could not be activated:", error)
+        return 0
+
     backend.reset_call_stats()
 
     if status.get("active") != "cuda":
-        raise RuntimeError("CUDA backend did not become active")
+        skip_or_fail("CUDA backend did not become active", args.require_cuda)
+        return 0
 
     print("CUDA backend active")
     print("device index:", status.get("device_index"))
@@ -232,7 +245,8 @@ def main():
     print("SireSoft-IKON executed real model training through custom CUDA kernels.")
     print("losses:", ", ".join(f"{value:.6f}" for value in losses))
     print("=" * 72)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

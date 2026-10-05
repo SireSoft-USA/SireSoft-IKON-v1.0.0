@@ -981,10 +981,10 @@ tests/
 The recommended runner is now the single end-to-end pipeline:
 
 ```bash
-python tools/run_real_pipeline.py
+python run_pipeline.py
 ```
 
-On the SireSoft server this defaults to strict CUDA mode and performs the complete build in sequence:
+The default mode is now `auto`: it prefers the custom CUDA backend when it is already available (or can be built), and otherwise continues on CPU instead of aborting just because `nvcc` is missing. Use `--device cuda` only when you explicitly want strict GPU-only validation.
 
 1. custom CUDA backend build/check
 2. real miniature GPU-training verification
@@ -1009,7 +1009,7 @@ This test does not require the real datasets or tokenizer artifacts:
 python tools/test_gpu_training.py --build-if-needed --arch sm_61
 ```
 
-A successful result ends with `GPU TRAINING TEST: PASS` and verifies that the real miniature Transformer training step exercised the custom CUDA matrix multiplication, embedding, attention, LayerNorm, cross-entropy and AdamW kernels.
+On a CUDA-capable server with the native backend available, a successful result ends with `GPU TRAINING TEST: PASS` and verifies that the real miniature Transformer training step exercised the custom CUDA matrix multiplication, embedding, attention, LayerNorm, cross-entropy and AdamW kernels. On machines without CUDA build/runtime support the portable test reports `SKIPPED` instead of failing the whole code suite. Add `--require-cuda` for strict server validation.
 
 CPU fallback validation:
 
@@ -1041,25 +1041,25 @@ model_store/checkpoints/sirellm-v1-training.jsonl
 The complete pipeline automatically resumes the progress checkpoint when it exists. To intentionally ignore it and start a fresh training run:
 
 ```bash
-python tools/run_real_pipeline.py --fresh
+python run_pipeline.py --fresh
 ```
 
 To change checkpoint frequency:
 
 ```bash
-python tools/run_real_pipeline.py --checkpoint-every 50
+python run_pipeline.py --checkpoint-every 50
 ```
 
 To run the full pipeline on CPU intentionally:
 
 ```bash
-python tools/run_real_pipeline.py --device cpu
+python run_pipeline.py --device cpu
 ```
 
 To start the FastAPI/React application after every artifact is built:
 
 ```bash
-python tools/run_real_pipeline.py --start-app
+python run_pipeline.py --start-app
 ```
 
 For individual runners, see `REAL_RUN.md` and `GPU_RUN.md`.

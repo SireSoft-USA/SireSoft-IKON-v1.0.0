@@ -5,23 +5,23 @@
 After activating the project virtual environment, run:
 
 ```bash
-python tools/run_real_pipeline.py
+python run_pipeline.py
 ```
 
-This is now the complete production-style artifact pipeline. It targets CUDA by default and handles custom CUDA verification, TinyStories reconstruction, preprocessing, tokenizer training, real model training, live progress visualization, periodic resumable checkpoints, retrieval index construction and final artifact verification.
+This is now the complete production-style artifact pipeline. It uses GPU-preferred `auto` device selection by default. A usable custom CUDA backend is selected automatically; if the backend is unavailable and cannot be built, the pipeline continues on CPU instead of terminating on an `nvcc` precheck. Use `python run_pipeline.py --device cuda` for strict GPU-only execution.
 
 ### Useful variants
 
 CPU-only functional run:
 
 ```bash
-python tools/run_real_pipeline.py --device cpu
+python run_pipeline.py --device cpu
 ```
 
 Continue an interrupted run automatically:
 
 ```bash
-python tools/run_real_pipeline.py
+python run_pipeline.py
 ```
 
 The pipeline detects `model_store/checkpoints/sirellm-v1-progress.lbckpt` and resumes the saved epoch/batch position.
@@ -29,19 +29,25 @@ The pipeline detects `model_store/checkpoints/sirellm-v1-progress.lbckpt` and re
 Force a fresh run:
 
 ```bash
-python tools/run_real_pipeline.py --fresh
+python run_pipeline.py --fresh
 ```
 
 Run everything and start the FastAPI/React application after artifacts are ready:
 
 ```bash
-python tools/run_real_pipeline.py --start-app
+python run_pipeline.py --start-app
 ```
 
 ### GPU readiness test
 
 ```bash
 python tools/test_gpu_training.py --build-if-needed --arch sm_61
+```
+
+Strict GPU validation:
+
+```bash
+python tools/test_gpu_training.py --build-if-needed --arch sm_61 --require-cuda
 ```
 
 ### CPU-only checkpoint test

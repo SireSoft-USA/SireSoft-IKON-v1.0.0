@@ -251,10 +251,18 @@ CRITICAL_FILES = (
     'runtime/composition/builder.py',
     'runtime/entrypoint/main.py',
     'runtime/server/server.py',
+    'run_pipeline.py',
+    'tools/run_pipeline.py',
     'tools/run_real_pipeline.py',
+    'tools/cuda_status.py',
+    'tools/run_tests.py',
     'tools/test_compute_backend.py',
     'tools/test_gpu_training.py',
     'tools/test_training_recovery.py',
+    'model_store/checkpoints/artifact.py',
+    'model_store/checkpoints/path_policy.py',
+    'model_store/checkpoints/catalog.py',
+    'model_store/checkpoints/store.py',
 )
 
 SMOKE_TESTS = (
