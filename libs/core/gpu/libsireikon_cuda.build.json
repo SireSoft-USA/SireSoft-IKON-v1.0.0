@@ -1,10 +1,10 @@
 {
   "architecture": "sm_61",
-  "build_host": "Linux-6.18.40.1-microsoft-standard-WSL2-x86_64-with-glibc2.35",
-  "builder": "local-nvcc",
-  "built_at_utc": "2026-10-05T21:32:55.852331+00:00",
-  "cuda_toolkit": "12.4",
-  "library_sha256": "2ee4cb6a8299f4e0113af898e9615b3124aec94ad78b2cc4731411ece9fd0ded",
+  "build_host": "Linux-6.17.0-1022-azure-x86_64-with-glibc2.39",
+  "builder": "github-actions",
+  "built_at_utc": "2026-10-05T21:38:18.551373+00:00",
+  "cuda_toolkit": "12.4.1",
+  "library_sha256": "3f8852736a8ab48e1e3f5bfe02aa5dd4d344e9b534d788fc3b8aeb31743786ab",
   "schema": 1,
   "source_sha256": "92f589b4cb1472c6a9884b34d3a14779ed7922d6ac4e74ab756ac72085e8c265",
   "target": "linux-x86_64"
