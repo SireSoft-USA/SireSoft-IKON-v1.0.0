@@ -1,0 +1,100 @@
+name: Build CUDA Backend (sm_61)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "libs/core/gpu/sireikon_cuda.cu"
+      - "tools/build_cuda_backend.py"
+      - "tools/write_cuda_build_metadata.py"
+      - ".github/workflows/build-cuda-backend.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cuda-backend-sm61-main
+  cancel-in-progress: true
+
+jobs:
+  build-linux-sm61:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Linux CUDA backend for Quadro P5000
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD:/work" \
+            -w /work \
+            nvidia/cuda:12.4.1-devel-ubuntu22.04 \
+            bash -lc '
+              set -euo pipefail
+              nvcc --version
+              nvcc \
+                -O3 \
+                -std=c++14 \
+                --shared \
+                --cudart=static \
+                -Xcompiler=-fPIC \
+                -gencode=arch=compute_61,code=sm_61 \
+                -gencode=arch=compute_61,code=compute_61 \
+                libs/core/gpu/sireikon_cuda.cu \
+                -o libs/core/gpu/libsireikon_cuda.so
+            '
+
+      - name: Validate binary and exported API
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s libs/core/gpu/libsireikon_cuda.so
+          file libs/core/gpu/libsireikon_cuda.so
+          nm -D libs/core/gpu/libsireikon_cuda.so | grep -q "sireikon_cuda_device_count"
+          nm -D libs/core/gpu/libsireikon_cuda.so | grep -q "sireikon_cuda_matmul"
+          nm -D libs/core/gpu/libsireikon_cuda.so | grep -q "sireikon_cuda_attention_forward"
+          nm -D libs/core/gpu/libsireikon_cuda.so | grep -q "sireikon_cuda_attention_backward"
+          nm -D libs/core/gpu/libsireikon_cuda.so | grep -q "sireikon_cuda_layernorm_forward"
+          nm -D libs/core/gpu/libsireikon_cuda.so | grep -q "sireikon_cuda_layernorm_backward"
+          nm -D libs/core/gpu/libsireikon_cuda.so | grep -q "sireikon_cuda_cross_entropy_forward"
+          nm -D libs/core/gpu/libsireikon_cuda.so | grep -q "sireikon_cuda_cross_entropy_backward"
+          nm -D libs/core/gpu/libsireikon_cuda.so | grep -q "sireikon_cuda_adamw"
+
+      - name: Write build metadata
+        shell: bash
+        run: |
+          python3 tools/write_cuda_build_metadata.py \
+            --arch sm_61 \
+            --toolkit 12.4.1 \
+            --builder github-actions \
+            --target linux-x86_64
+
+      - name: Upload compiled backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sireikon-cuda-linux-x86_64-sm61
+          path: |
+            libs/core/gpu/libsireikon_cuda.so
+            libs/core/gpu/libsireikon_cuda.build.json
+          if-no-files-found: error
+
+      - name: Commit precompiled backend to main
+        if: github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f \
+            libs/core/gpu/libsireikon_cuda.so \
+            libs/core/gpu/libsireikon_cuda.build.json
+          if git diff --cached --quiet; then
+            echo "CUDA backend is already current."
+            exit 0
+          fi
+          git commit -m "build: refresh precompiled CUDA backend (sm_61)"
+          git push origin HEAD:main

@@ -1,14 +1,12 @@
-"""One-command SireSoft-IKON build/training pipeline.
+"""One-command SireSoft-IKON training/deployment pipeline.
 
-Default behavior uses auto device selection: CUDA is preferred when the project's native backend is already available (or can be built), otherwise the same
-pipeline continues safely on CPU.  nvcc is treated as a build-time tool only.
+Production CUDA is runtime-only: this command NEVER invokes nvcc and NEVER
+compiles native code on the GPU server.  The Linux ``libsireikon_cuda.so`` is
+built ahead of time (normally by GitHub Actions) and committed with matching
+source-hash metadata.  The default device is strict CUDA so production cannot
+silently spend hours training on CPU.
 
-Pipeline stages:
-  CUDA backend build/check -> GPU training smoke test -> TinyStories rebuild ->
-  preprocessing -> tokenizer -> resumable model training with live visualization ->
-  retrieval index -> artifact verification.
-
-No Python ML/numerical libraries are required.
+Use ``--device cpu`` explicitly for laptop/development runs without NVIDIA GPU.
 """
 
 import argparse
@@ -17,7 +15,7 @@ import sys
 from pathlib import Path
 
 from real_runtime import ROOT, enter_project_root
-from cuda_status import CUDA_LIBRARY, backend_needs_build, nvcc_info
+from cuda_status import CUDA_LIBRARY, backend_is_current, load_build_metadata, nvidia_smi_info
 
 
 TINYSTORIES_PARTS_DIR = ROOT / "datasets" / "canonical" / "tinystories_parts"
@@ -121,16 +119,11 @@ def rebuild_tinystories_if_needed():
         raise
 
 
-def cuda_backend_needs_build():
-    # Backward-compatible local helper used by older callers/tests.
-    return backend_needs_build()
-
-
 def prepare_compute(args, python, tools):
     banner("STEP: Compute backend verification")
 
     if args.device == "cpu":
-        print("CPU mode requested. CUDA build/test skipped.")
+        print("CPU mode requested explicitly. CUDA runtime test skipped.")
         run([
             python,
             str(tools / "test_compute_backend.py"),
@@ -139,52 +132,44 @@ def prepare_compute(args, python, tools):
         ])
         return
 
-    compiler = nvcc_info()
-    library_exists = CUDA_LIBRARY.is_file() and CUDA_LIBRARY.stat().st_size > 0
-    needs_build = backend_needs_build()
+    current, reason = backend_is_current(expected_arch=args.cuda_arch)
+    metadata = load_build_metadata() or {}
+    smi = nvidia_smi_info()
 
     print("CUDA runtime backend:", CUDA_LIBRARY)
-    print("CUDA backend present:", "yes" if library_exists else "no")
-    print("CUDA compiler (nvcc):", compiler.get("path") or "not available")
+    print("precompiled backend:", "yes" if CUDA_LIBRARY.is_file() else "no")
+    print("backend check:", reason)
+    if metadata:
+        print("backend architecture:", metadata.get("architecture") or "unknown")
+        print("backend CUDA toolkit:", metadata.get("cuda_toolkit") or "unknown")
+    print("NVIDIA driver/GPU visibility:", "yes" if smi.get("available") else "no")
+    if smi.get("gpus"):
+        print(smi["gpus"])
 
-    # Important: nvcc is only needed to BUILD the native library.  It is not a
-    # prerequisite for using an already-built backend during training.
-    if needs_build and not args.skip_cuda_build:
-        if compiler.get("available"):
-            command = [
-                python,
-                str(tools / "build_cuda_backend.py"),
-                "--arch",
-                args.cuda_arch,
-            ]
-            if args.device == "cuda":
-                command.append("--required")
-            run(command, required=(args.device == "cuda"))
-            library_exists = CUDA_LIBRARY.is_file() and CUDA_LIBRARY.stat().st_size > 0
-        elif library_exists:
-            print(
-                "[INFO] nvcc is not available, but a prebuilt CUDA backend exists. "
-                "Using it without rebuilding."
-            )
-        elif args.device == "cuda":
+    if not current:
+        if args.device == "cuda":
             raise SystemExit(
-                "Strict CUDA mode was requested, but libsireikon_cuda.so is missing "
-                "and no CUDA compiler is available to build it. nvcc is not needed "
-                "at runtime once a prebuilt backend exists. Use --device auto for "
-                "safe GPU-preferred fallback, or provide a prebuilt sm_61 backend."
+                "Strict CUDA training requires the precompiled backend, but "
+                + reason
+                + ". This server does not build CUDA code. Push the project to GitHub "
+                  "and run the 'Build CUDA Backend (sm_61)' workflow, or compile on a "
+                  "Linux x86_64 development machine with CUDA 12.x using "
+                  "`python tools/build_cuda_backend.py --arch sm_61 --required`, then commit "
+                  "libs/core/gpu/libsireikon_cuda.so and its .build.json metadata."
             )
-        else:
-            print(
-                "[INFO] CUDA backend is not currently available and no CUDA compiler "
-                "was found. Auto mode will continue with CPU instead of aborting."
-            )
-    elif args.skip_cuda_build:
-        print("[SKIP] CUDA backend build skipped by --skip-cuda-build")
-    else:
-        print("[SKIP] CUDA backend is already built and up to date.")
+        print("[INFO] Precompiled CUDA backend is unavailable/stale; auto mode will use CPU.")
+        run([
+            python,
+            str(tools / "test_compute_backend.py"),
+            "--device",
+            "auto",
+            "--cuda-device-index",
+            str(args.cuda_device_index),
+        ])
+        return
 
     if args.skip_gpu_test:
-        print("[SKIP] Compute smoke test skipped.")
+        print("[SKIP] GPU smoke test skipped by --skip-gpu-test")
         return
 
     if args.device == "cuda":
@@ -195,12 +180,9 @@ def prepare_compute(args, python, tools):
             str(args.cuda_device_index),
             "--arch",
             args.cuda_arch,
-            "--build-if-needed",
             "--require-cuda",
         ])
     else:
-        # auto validates whichever backend is actually usable.  On machines
-        # without CUDA this is a legitimate CPU test, not a CUDA failure.
         run([
             python,
             str(tools / "test_compute_backend.py"),
@@ -209,6 +191,7 @@ def prepare_compute(args, python, tools):
             "--cuda-device-index",
             str(args.cuda_device_index),
         ])
+
 
 def verify_canonical_datasets():
     missing = []
@@ -266,10 +249,11 @@ def main():
     parser.add_argument(
         "--device",
         choices=("cuda", "auto", "cpu"),
-        default="auto",
+        default="cuda",
         help=(
-            "Default is GPU-preferred auto mode: use CUDA when the native backend "
-            "is available, otherwise continue on CPU. Use cuda for strict GPU-only mode."
+            "Default is strict GPU-only CUDA deployment mode. Use --device cpu "
+            "explicitly on a laptop without NVIDIA GPU, or auto only when CPU fallback "
+            "is intentionally acceptable."
         ),
     )
     parser.add_argument("--cuda-device-index", type=int, default=0)
@@ -279,7 +263,6 @@ def main():
         help="Quadro P5000 is Pascal sm_61.",
     )
 
-    parser.add_argument("--skip-cuda-build", action="store_true")
     parser.add_argument("--skip-gpu-test", action="store_true")
     parser.add_argument("--skip-preprocessing", action="store_true")
     parser.add_argument("--skip-tokenizer", action="store_true")
@@ -410,8 +393,8 @@ def main():
     print("Retrieval: vector_store/indexes/siresoft.slretr")
     print()
     print("RAG CLI: python tools/chat_rag.py")
-    print("GPU test: python tools/test_gpu_training.py --build-if-needed --arch sm_61")
-    print("Strict GPU test: add --require-cuda")
+    print("GPU test: python tools/test_gpu_training.py --arch sm_61 --require-cuda")
+    print("CUDA build (development/CI only): python tools/build_cuda_backend.py --arch sm_61 --required")
 
     if args.start_app:
         banner("STEP: Starting application")

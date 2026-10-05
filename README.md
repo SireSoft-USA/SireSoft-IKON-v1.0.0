@@ -978,91 +978,97 @@ tests/
 
 ## Real Execution Guide
 
-The recommended runner is now the single end-to-end pipeline:
+Production deployment now uses a **precompiled CUDA backend**. The GPU server
+never runs `nvcc` and never installs/builds a CUDA Toolkit. The recommended
+server command is simply:
 
 ```bash
 python run_pipeline.py
 ```
 
-The default mode is now `auto`: it prefers the custom CUDA backend when it is already available (or can be built), and otherwise continues on CPU instead of aborting just because `nvcc` is missing. Use `--device cuda` only when you explicitly want strict GPU-only validation.
-
-1. custom CUDA backend build/check
-2. real miniature GPU-training verification
-3. TinyStories split-file reconstruction when required
-4. raw-to-canonical preprocessing for all datasets
-5. canonical dataset verification
-6. BPE tokenizer training
-7. real Transformer training on the selected device
-8. live terminal progress visualization
-9. periodic resumable batch checkpoints
-10. validation and complete-epoch checkpoints
-11. SireSoft retrieval/RAG index build
-12. final artifact verification
-
-For the Quadro P5000, the default CUDA architecture is `sm_61`. The custom backend is written in CUDA C/C++ and loaded with Python's standard-library `ctypes`; no PyTorch, TensorFlow, NumPy, CuPy or Numba is used.
-
-### GPU readiness test
-
-This test does not require the real datasets or tokenizer artifacts:
-
-```bash
-python tools/test_gpu_training.py --build-if-needed --arch sm_61
-```
-
-On a CUDA-capable server with the native backend available, a successful result ends with `GPU TRAINING TEST: PASS` and verifies that the real miniature Transformer training step exercised the custom CUDA matrix multiplication, embedding, attention, LayerNorm, cross-entropy and AdamW kernels. On machines without CUDA build/runtime support the portable test reports `SKIPPED` instead of failing the whole code suite. Add `--require-cuda` for strict server validation.
-
-CPU fallback validation:
-
-```bash
-python tools/test_compute_backend.py --device cpu
-python tools/test_training_recovery.py
-```
-
-### Model training visibility and recovery
-
-During training, the terminal displays a live progress line such as:
-
-```text
-EPOCH 1/1 [############------------------] 1680/4074 41.24% loss=5.123450 avg=5.391820 lr=0.00082 elapsed=02:31:08 ETA=03:35:40 device=cuda
-```
-
-By default a resumable checkpoint is saved every 100 batches. The latest resume point is always written to:
-
-```text
-model_store/checkpoints/sirellm-v1-progress.lbckpt
-```
-
-Numbered step checkpoints are also retained, with the newest five kept by default. Per-batch training metrics are streamed to:
-
-```text
-model_store/checkpoints/sirellm-v1-training.jsonl
-```
-
-The complete pipeline automatically resumes the progress checkpoint when it exists. To intentionally ignore it and start a fresh training run:
-
-```bash
-python run_pipeline.py --fresh
-```
-
-To change checkpoint frequency:
-
-```bash
-python run_pipeline.py --checkpoint-every 50
-```
-
-To run the full pipeline on CPU intentionally:
+The pipeline defaults to strict `cuda` mode, so it will stop before full
+training if GPU execution cannot be proven. It will not silently train for
+hours on CPU. For a laptop without NVIDIA hardware, use:
 
 ```bash
 python run_pipeline.py --device cpu
 ```
 
-To start the FastAPI/React application after every artifact is built:
+### Build the CUDA backend before deployment
 
-```bash
-python run_pipeline.py --start-app
+The Quadro P5000 target is Pascal `sm_61`. The repository includes:
+
+```text
+.github/workflows/build-cuda-backend.yml
 ```
 
-For individual runners, see `REAL_RUN.md` and `GPU_RUN.md`.
+After you push CUDA/source changes to `main`, GitHub Actions compiles the Linux
+backend with CUDA 12.x, validates its exported API, creates source-hash build
+metadata, uploads an Actions artifact, and commits these files back to `main`:
+
+```text
+libs/core/gpu/libsireikon_cuda.so
+libs/core/gpu/libsireikon_cuda.build.json
+```
+
+A GPU is **not required for compilation**. If you prefer to compile manually,
+use Linux/WSL x86_64 with CUDA Toolkit 12.x:
+
+```bash
+python tools/build_cuda_backend.py --arch sm_61 --required
+```
+
+Do not compile the deployment backend directly as a native Windows DLL; the
+server requires a Linux `.so`.
+
+### GPU readiness test
+
+After the GitHub workflow has committed the prebuilt backend, the server only
+needs to pull it and test runtime CUDA:
+
+```bash
+git pull origin main
+python tools/cuda_status.py --arch sm_61
+python tools/test_gpu_training.py --arch sm_61 --require-cuda
+```
+
+A successful strict test ends with `GPU TRAINING TEST: PASS` and verifies that a
+real miniature Transformer training step exercised the custom CUDA matmul,
+embedding, attention, LayerNorm, cross-entropy, and AdamW kernels.
+
+The complete pipeline then performs:
+
+1. strict precompiled-CUDA/runtime verification
+2. real miniature GPU-training verification
+3. TinyStories split-file reconstruction when required
+4. raw-to-canonical preprocessing
+5. canonical dataset verification
+6. BPE tokenizer training
+7. resumable Transformer training on CUDA
+8. live progress + periodic checkpoints
+9. retrieval/RAG index build
+10. final artifact verification
+
+During training the terminal displays live progress such as:
+
+```text
+EPOCH 1/1 [############------------------] 1680/4074 41.24% loss=5.123450 avg=5.391820 lr=0.00082 elapsed=02:31:08 ETA=03:35:40 device=cuda
+```
+
+The progress checkpoint is written to:
+
+```text
+model_store/checkpoints/sirellm-v1-progress.lbckpt
+```
+
+To intentionally ignore it and start fresh:
+
+```bash
+python run_pipeline.py --fresh
+```
+
+For the complete CUDA build/deployment commands, see `GPU_RUN.md`. For the
+end-to-end execution commands, see `REAL_RUN.md`.
 
 ---
 

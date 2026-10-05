@@ -1,106 +1,90 @@
-"""Build SireSoft-IKON's custom CUDA backend.
+"""Developer/CI build tool for SireSoft-IKON's CUDA backend.
 
-nvcc is a build-time dependency only.  If a usable prebuilt backend already
-exists, runtime training does not require nvcc.  In non-required mode this
-script exits cleanly when no compiler is available so the auto-device pipeline
-can continue on CPU instead of crashing during a CUDA build precheck.
+This command is intentionally NOT called by ``run_pipeline.py``.  Production
+training consumes a precompiled Linux ``libsireikon_cuda.so`` and never needs
+``nvcc`` on the server.
+
+A GPU is not required to compile.  A Linux x86_64 environment with CUDA 12.x
+``nvcc`` is required for the Quadro P5000 / Pascal ``sm_61`` target.
 """
 
 import argparse
 import os
+import platform
+import re
 import subprocess
-from pathlib import Path
+import sys
 
-from real_runtime import ROOT, enter_project_root
 from cuda_status import CUDA_LIBRARY, CUDA_SOURCE, nvcc_info
+from real_runtime import ROOT, enter_project_root
+
+
+def toolkit_release(version_text):
+    match = re.search(r"release\s+([0-9]+(?:\.[0-9]+)?)", version_text or "")
+    return match.group(1) if match else "unknown"
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Compile the custom SireSoft-IKON CUDA compute backend."
-    )
-    parser.add_argument(
-        "--arch",
-        default=os.getenv("SIREIKON_CUDA_ARCH", "sm_61"),
-        help="CUDA architecture. Quadro P5000 uses sm_61.",
-    )
-    parser.add_argument(
-        "--nvcc",
-        default=os.getenv("NVCC"),
-        help="Optional explicit path/name of NVIDIA nvcc compiler.",
-    )
-    parser.add_argument(
-        "--required",
-        action="store_true",
-        help="Fail if the CUDA backend cannot be built. Default is non-fatal.",
-    )
+    parser = argparse.ArgumentParser(description="Compile the Linux SireSoft-IKON CUDA backend.")
+    parser.add_argument("--arch", default=os.getenv("SIREIKON_CUDA_ARCH", "sm_61"))
+    parser.add_argument("--nvcc", default=os.getenv("NVCC"))
+    parser.add_argument("--required", action="store_true")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
     enter_project_root()
 
+    if sys.platform != "linux" or platform.machine().lower() not in ("x86_64", "amd64"):
+        message = (
+            "The deployment backend must be built as linux-x86_64. "
+            "Use the included GitHub Actions workflow, or run this command inside Linux/WSL with CUDA 12.x."
+        )
+        if args.required:
+            raise SystemExit(message)
+        print("[SKIP]", message)
+        return 0
+
     compiler = nvcc_info(args.nvcc)
     nvcc = compiler.get("path")
-
     if not compiler.get("available"):
-        if CUDA_LIBRARY.is_file() and CUDA_LIBRARY.stat().st_size > 0:
-            print("[OK] nvcc is not available, but a prebuilt CUDA backend exists.")
-            print("runtime library:", CUDA_LIBRARY)
-            print("No rebuild is required for runtime CUDA use.")
-            return 0
-
         message = (
-            "CUDA compiler is not available and no prebuilt SireSoft-IKON CUDA "
-            "backend was found. nvcc is required only to build libsireikon_cuda.so."
+            "nvcc is not available. Runtime training does not need nvcc; build the backend in GitHub Actions "
+            "or on a Linux x86_64 development machine with CUDA 12.x."
         )
         if args.required:
             raise SystemExit(message)
         print("[SKIP]", message)
-        print("Auto-device mode can continue with the handwritten CPU backend.")
         return 0
 
-    version_text = compiler.get("version_text") or ""
     major = compiler.get("major")
-    print(version_text)
-    print()
-
     if args.arch == "sm_61" and major is not None and major >= 13:
-        message = (
-            "This nvcc is CUDA Toolkit 13+ and cannot offline-compile Pascal sm_61. "
-            "A CUDA 12.x compiler or a prebuilt sm_61 backend is required."
+        raise SystemExit(
+            "CUDA Toolkit 13+ cannot offline-compile the Pascal sm_61 deployment target. "
+            "Use CUDA 12.x."
         )
-        if CUDA_LIBRARY.is_file() and CUDA_LIBRARY.stat().st_size > 0:
-            print("[OK]", message)
-            print("Using existing prebuilt backend:", CUDA_LIBRARY)
-            return 0
-        if args.required:
-            raise SystemExit(message)
-        print("[SKIP]", message)
-        return 0
 
-    source = CUDA_SOURCE
-    output = CUDA_LIBRARY
-    if not source.is_file():
-        raise SystemExit("CUDA source file is missing: " + str(source))
+    if not CUDA_SOURCE.is_file():
+        raise SystemExit("CUDA source file is missing: " + str(CUDA_SOURCE))
 
     command = [
         str(nvcc),
         "-O3",
         "-std=c++14",
         "--shared",
-        "-Xcompiler",
-        "-fPIC",
-        "-arch=" + args.arch,
-        str(source),
+        "--cudart=static",
+        "-Xcompiler=-fPIC",
+        "-gencode=arch=compute_61,code=sm_61" if args.arch == "sm_61" else "-arch=" + args.arch,
+        str(CUDA_SOURCE),
         "-o",
-        str(output),
+        str(CUDA_LIBRARY),
     ]
+    if args.arch == "sm_61":
+        command.insert(-3, "-gencode=arch=compute_61,code=compute_61")
 
-    print("Building custom CUDA backend")
+    print("Building SireSoft-IKON CUDA backend")
+    print("target: linux-x86_64")
     print("architecture:", args.arch)
     print("compiler:", nvcc)
-    print("source:", source)
-    print("output:", output)
     if args.verbose:
         print("command:", " ".join(command))
     print()
@@ -109,18 +93,29 @@ def main():
     if completed.returncode != 0:
         if args.required:
             raise SystemExit(completed.returncode)
-        print("[WARN] CUDA backend build failed; auto-device mode may use CPU.")
+        print("[WARN] CUDA backend build failed.")
         return completed.returncode
 
-    if not output.is_file() or output.stat().st_size == 0:
-        message = "CUDA build command completed but shared library is missing."
-        if args.required:
-            raise SystemExit(message)
-        print("[WARN]", message)
-        return 1
+    if not CUDA_LIBRARY.is_file() or CUDA_LIBRARY.stat().st_size == 0:
+        raise SystemExit("CUDA build completed but libsireikon_cuda.so was not produced.")
+
+    release = toolkit_release(compiler.get("version_text"))
+    metadata_command = [
+        sys.executable,
+        str(ROOT / "tools" / "write_cuda_build_metadata.py"),
+        "--arch",
+        args.arch,
+        "--toolkit",
+        release,
+        "--builder",
+        "local-nvcc",
+    ]
+    metadata = subprocess.run(metadata_command, cwd=ROOT)
+    if metadata.returncode != 0:
+        raise SystemExit(metadata.returncode)
 
     print("CUDA BACKEND BUILD COMPLETE")
-    print(output)
+    print(CUDA_LIBRARY)
     return 0
 
 

@@ -1,18 +1,16 @@
-"""Verify that SireSoft-IKON can execute a real training step on CUDA.
+"""Verify real SireSoft-IKON training through the precompiled CUDA backend.
 
-This is both a manual GPU diagnostic and part of the project test surface.  A
-machine without NVIDIA tooling is reported as SKIPPED by default instead of
-failing the whole code test suite.  Pass --require-cuda when CUDA availability
-must be treated as mandatory (the strict training pipeline uses that mode).
+This command never builds CUDA code.  Production/runtime verification is kept
+separate from compilation so the GPU server only loads the checked-in
+``libsireikon_cuda.so`` and trains.
 """
 
 import argparse
 import math
 import subprocess
-import sys
 
 from real_runtime import ROOT, enter_project_root, load_training_namespace
-from cuda_status import CUDA_LIBRARY, backend_needs_build, nvidia_smi_info, nvcc_info
+from cuda_status import CUDA_LIBRARY, backend_is_current, nvidia_smi_info
 
 
 REQUIRED_KERNELS = (
@@ -45,45 +43,20 @@ def show_nvidia_smi():
         print()
     else:
         print("[INFO] nvidia-smi diagnostic unavailable:", info.get("error"))
-        print("The backend itself will still be tested if it can load CUDA.")
         print()
 
 
-def maybe_build_backend(build_if_needed, arch, required):
-    if not backend_needs_build():
-        print("CUDA backend already built:", CUDA_LIBRARY)
-        return True
-
-    if not build_if_needed:
+def validate_prebuilt_backend(arch, required):
+    ok, reason = backend_is_current(expected_arch=arch)
+    print("precompiled CUDA backend:", CUDA_LIBRARY)
+    print("backend check:", reason)
+    if not ok:
         return skip_or_fail(
-            "CUDA backend is not built. Re-run with --build-if-needed, or provide "
-            "a prebuilt libsireikon_cuda.so.",
+            reason
+            + ". Build/refresh the backend using the GitHub 'Build CUDA Backend' workflow "
+              "or `python tools/build_cuda_backend.py --arch sm_61 --required` on Linux CUDA 12.x.",
             required,
         )
-
-    compiler = nvcc_info()
-    if not compiler.get("available") and not CUDA_LIBRARY.is_file():
-        return skip_or_fail(
-            "CUDA backend needs a build, but no CUDA compiler is available. "
-            "This is a build-time limitation, not a Python/runtime CUDA error.",
-            required,
-        )
-
-    print("Preparing CUDA backend before test...")
-    command = [
-        sys.executable,
-        str(ROOT / "tools" / "build_cuda_backend.py"),
-        "--arch",
-        arch,
-    ]
-    if required:
-        command.append("--required")
-    completed = subprocess.run(command, cwd=ROOT)
-    if completed.returncode != 0:
-        return skip_or_fail("CUDA backend build failed", required)
-    if not CUDA_LIBRARY.is_file() or CUDA_LIBRARY.stat().st_size == 0:
-        return skip_or_fail("CUDA backend is still unavailable after build step", required)
-    print()
     return True
 
 
@@ -111,16 +84,15 @@ def show_compute_processes():
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Run a real SireSoft-IKON CUDA training smoke test."
+        description="Run a real SireSoft-IKON CUDA training smoke test using the prebuilt backend."
     )
     parser.add_argument("--cuda-device-index", type=int, default=0)
     parser.add_argument("--steps", type=int, default=3)
     parser.add_argument("--arch", default="sm_61")
-    parser.add_argument("--build-if-needed", action="store_true")
     parser.add_argument(
         "--require-cuda",
         action="store_true",
-        help="Fail instead of SKIP when CUDA cannot be activated.",
+        help="Fail instead of SKIP when the prebuilt CUDA backend/GPU cannot be activated.",
     )
     args = parser.parse_args()
 
@@ -134,7 +106,7 @@ def main():
     print("=" * 72)
 
     show_nvidia_smi()
-    if not maybe_build_backend(args.build_if_needed, args.arch, args.require_cuda):
+    if not validate_prebuilt_backend(args.arch, args.require_cuda):
         return 0
 
     ns = load_training_namespace()

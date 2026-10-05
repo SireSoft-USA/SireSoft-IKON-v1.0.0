@@ -71,8 +71,10 @@ class CudaBackend:
                 self.load_error = str(error)
         if self.load_error is None:
             self.load_error = (
-                "custom CUDA library not found; run "
-                "python tools/build_cuda_backend.py"
+                "precompiled CUDA runtime library is missing: "
+                "libs/core/gpu/libsireikon_cuda.so. "
+                "Build it in GitHub Actions (Build CUDA Backend) or on a Linux "
+                "development machine with CUDA 12.x, then deploy the compiled library."
             )
 
     def _bind_signatures(self):

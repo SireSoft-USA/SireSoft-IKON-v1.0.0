@@ -41,9 +41,9 @@ def discover_tests():
 def run_one(relative, timeout):
     command = [sys.executable, str(ROOT / relative)]
     if relative == "tools/test_gpu_training.py":
-        # Hardware absence is a valid SKIP.  --require-cuda is reserved for
-        # strict server validation, not the portable code test suite.
-        command.extend(["--build-if-needed", "--arch", "sm_61"])
+        # The portable suite never builds native CUDA code. Hardware/backend
+        # absence is a valid SKIP; strict CUDA is validated on the GPU server.
+        command.extend(["--arch", "sm_61"])
     started = time.time()
     try:
         completed = subprocess.run(

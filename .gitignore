@@ -195,7 +195,10 @@ sandbox/
 # Original TinyStories canonical file exceeds GitHub LFS per-file limit
 datasets/canonical/tinystories.jsonl
 # -------------------- Custom CUDA build output --------------------
+# The Linux sm_61 runtime backend is intentionally versioned so the server
+# never needs nvcc/CUDA Toolkit. Other local native outputs remain ignored.
 libs/core/gpu/*.so
+!libs/core/gpu/libsireikon_cuda.so
 libs/core/gpu/*.dll
 libs/core/gpu/*.dylib
 
