@@ -10,6 +10,14 @@ from real_runtime import (
 def build_stack(args):
     ns = load_rag_namespace()
 
+    compute_backend = ns.get("GPU_BACKEND")
+    if compute_backend is not None:
+        compute_backend.configure(
+            getattr(args, "device", "auto"),
+            getattr(args, "cuda_device_index", 0),
+            strict=(getattr(args, "device", "auto") == "cuda"),
+        )
+
     tokenizer_manager = ns[
         "build_tokenizer_manager"
     ]()
@@ -267,6 +275,16 @@ def main():
         "--seed",
         type=int,
         default=1337,
+    )
+    parser.add_argument(
+        "--device",
+        choices=("auto", "cpu", "cuda"),
+        default="auto",
+    )
+    parser.add_argument(
+        "--cuda-device-index",
+        type=int,
+        default=0,
     )
     args = parser.parse_args()
 

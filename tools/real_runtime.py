@@ -43,6 +43,15 @@ def _base_namespace():
     }
 
 
+def _load_compute_backend(namespace):
+    """Load the optional stdlib+CUDA compute backend into a runtime namespace."""
+    _exec_file(
+        namespace,
+        "libs/core/gpu/backend.py",
+    )
+    return namespace
+
+
 def load_preprocessing_namespace():
     enter_project_root()
     ns = _base_namespace()
@@ -189,6 +198,7 @@ def load_tokenizer_namespace():
 def load_training_namespace():
     enter_project_root()
     ns = _base_namespace()
+    _load_compute_backend(ns)
 
     groups = [
         (
@@ -419,6 +429,7 @@ def load_retrieval_namespace():
 def load_inference_namespace():
     enter_project_root()
     ns = _base_namespace()
+    _load_compute_backend(ns)
 
     groups = [
         (
@@ -536,6 +547,7 @@ def load_inference_namespace():
 def load_rag_namespace():
     enter_project_root()
     ns = _base_namespace()
+    _load_compute_backend(ns)
 
     groups = [
         (

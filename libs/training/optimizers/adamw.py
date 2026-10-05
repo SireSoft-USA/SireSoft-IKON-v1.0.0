@@ -100,8 +100,16 @@ class AdamW:
 
             gradient = parameter.grad.flatten()
 
-            for value in gradient:
-                total += value * value
+            if (
+                "GPU_BACKEND" in globals()
+                and GPU_BACKEND is not None
+                and GPU_BACKEND.enabled()
+                and len(gradient) > 0
+            ):
+                total += GPU_BACKEND.sum_squares(gradient)
+            else:
+                for value in gradient:
+                    total += value * value
 
         return sqrt(total)
 
@@ -142,57 +150,78 @@ class AdamW:
             first = self._first_moment[parameter_index].flatten()
             second = self._second_moment[parameter_index].flatten()
 
-            updated_values = []
-            updated_first = []
-            updated_second = []
-
-            item = 0
-
-            while item < len(values):
-                gradient = gradients[item] * scale
-
-                first_value = (
-                    self.beta1 * first[item]
-                    + (1.0 - self.beta1) * gradient
+            if (
+                "GPU_BACKEND" in globals()
+                and GPU_BACKEND is not None
+                and GPU_BACKEND.enabled()
+                and len(values) > 0
+            ):
+                updated_values, updated_first, updated_second = GPU_BACKEND.adamw(
+                    values,
+                    gradients,
+                    first,
+                    second,
+                    self.learning_rate,
+                    self.beta1,
+                    self.beta2,
+                    self.epsilon,
+                    self.weight_decay,
+                    scale,
+                    bias_correction1,
+                    bias_correction2,
                 )
+            else:
+                updated_values = []
+                updated_first = []
+                updated_second = []
 
-                second_value = (
-                    self.beta2 * second[item]
-                    + (1.0 - self.beta2) * gradient * gradient
-                )
+                item = 0
 
-                first_hat = first_value / bias_correction1
-                second_hat = second_value / bias_correction2
+                while item < len(values):
+                    gradient = gradients[item] * scale
 
-                update = (
-                    first_hat
-                    / (
-                        sqrt(second_hat)
-                        + self.epsilon
+                    first_value = (
+                        self.beta1 * first[item]
+                        + (1.0 - self.beta1) * gradient
                     )
-                )
 
-                parameter_value = values[item]
+                    second_value = (
+                        self.beta2 * second[item]
+                        + (1.0 - self.beta2) * gradient * gradient
+                    )
 
-                if self.weight_decay != 0.0:
-                    parameter_value = (
-                        parameter_value
-                        * (
-                            1.0
-                            - self.learning_rate
-                            * self.weight_decay
+                    first_hat = first_value / bias_correction1
+                    second_hat = second_value / bias_correction2
+
+                    update = (
+                        first_hat
+                        / (
+                            sqrt(second_hat)
+                            + self.epsilon
                         )
                     )
 
-                parameter_value -= (
-                    self.learning_rate * update
-                )
+                    parameter_value = values[item]
 
-                updated_values.append(parameter_value)
-                updated_first.append(first_value)
-                updated_second.append(second_value)
+                    if self.weight_decay != 0.0:
+                        parameter_value = (
+                            parameter_value
+                            * (
+                                1.0
+                                - self.learning_rate
+                                * self.weight_decay
+                            )
+                        )
 
-                item += 1
+                    parameter_value -= (
+                        self.learning_rate * update
+                    )
+
+                    updated_values.append(parameter_value)
+                    updated_first.append(first_value)
+                    updated_second.append(second_value)
+
+                    item += 1
 
             shape = [dimension for dimension in parameter.shape]
 

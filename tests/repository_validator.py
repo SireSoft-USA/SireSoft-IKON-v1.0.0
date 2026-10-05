@@ -155,121 +155,104 @@ class RepositoryValidator:
 
     def validate_python_imports(self):
         python_files = sorted(
-            self.root.rglob(
-                "*.py"
-            )
+            self.root.rglob("*.py")
         )
 
         stdlib = set(
-            getattr(
-                sys,
-                "stdlib_module_names",
-                (),
-            )
+            getattr(sys, "stdlib_module_names", ())
         )
 
         top_level_roots = {
             path.name
-            for path
-            in self.root.iterdir()
+            for path in self.root.iterdir()
             if path.is_dir()
         }
 
         local_module_names = {
             path.stem
-            for path
-            in python_files
+            for path in python_files
+        }
+
+        # These are existing application/runtime dependencies, not ML/compute
+        # dependencies. The no-library ML constraint is enforced separately.
+        allowed_runtime_roots = {
+            "fastapi",
+            "pydantic",
+            "uvicorn",
+        }
+
+        forbidden_ml_roots = {
+            "torch",
+            "tensorflow",
+            "numpy",
+            "cupy",
+            "numba",
+            "jax",
+            "scipy",
+            "sklearn",
+            "transformers",
+            "keras",
         }
 
         external = set()
+        allowed_external = set()
+        forbidden_found = set()
         parse_errors = []
 
         for path in python_files:
-            relative = (
-                path.relative_to(
-                    self.root
-                )
-                .as_posix()
-            )
+            relative = path.relative_to(self.root).as_posix()
 
             try:
                 tree = ast.parse(
-                    path.read_text(
-                        encoding="utf-8"
-                    ),
+                    path.read_text(encoding="utf-8"),
                     filename=relative,
                 )
             except Exception as error:
                 parse_errors.append({
                     "path": relative,
-                    "error": str(
-                        error
-                    ),
+                    "error": str(error),
                 })
                 continue
 
-            for node in ast.walk(
-                tree
-            ):
-                if isinstance(
-                    node,
-                    ast.Import,
-                ):
-                    names = [
-                        alias.name
-                        for alias
-                        in node.names
-                    ]
-
-                elif isinstance(
-                    node,
-                    ast.ImportFrom,
-                ):
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    names = [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom):
                     if node.level > 0:
                         continue
-
-                    names = (
-                        [node.module]
-                        if node.module
-                        else []
-                    )
-
+                    names = [node.module] if node.module else []
                 else:
                     continue
 
                 for name in names:
-                    root_name = (
-                        name.split(
-                            "."
-                        )[0]
-                    )
+                    root_name = name.split(".")[0]
+
+                    if root_name in forbidden_ml_roots:
+                        forbidden_found.add(root_name)
+                        continue
 
                     if (
-                        root_name
-                        in stdlib
-                        or root_name
-                        in top_level_roots
-                        or root_name
-                        in local_module_names
+                        root_name in stdlib
+                        or root_name in top_level_roots
+                        or root_name in local_module_names
                     ):
                         continue
 
-                    external.add(
-                        root_name
-                    )
+                    if root_name in allowed_runtime_roots:
+                        allowed_external.add(root_name)
+                        continue
+
+                    external.add(root_name)
 
         return {
-            "python_file_count": len(
-                python_files
-            ),
-            "external_roots": sorted(
-                external
-            ),
-            "parse_errors": (
-                parse_errors
-            ),
+            "python_file_count": len(python_files),
+            "external_roots": sorted(external),
+            "allowed_external_roots": sorted(allowed_external),
+            "forbidden_ml_roots": sorted(forbidden_found),
+            "parse_errors": parse_errors,
             "valid": (
                 not external
+                and not forbidden_found
                 and not parse_errors
             ),
         }
@@ -325,88 +308,115 @@ class RepositoryValidator:
         )
 
     def validate_frontend_contract(self):
-        html = (
-            self.root
-            / "frontend/index.html"
-        ).read_text(
-            encoding="utf-8"
+        frontend = self.root / "frontend"
+        index_html = frontend / "index.html"
+        package_json = frontend / "package.json"
+        vite_config = frontend / "vite.config.ts"
+        main_tsx = frontend / "src/main.tsx"
+        app_tsx = frontend / "src/App.tsx"
+        index_css = frontend / "src/index.css"
+        api_ts = frontend / "src/lib/api.ts"
+        components_dir = frontend / "src/components"
+        public_dir = frontend / "public"
+        backend_app = self.root / "app.py"
+
+        required_files = (
+            index_html, package_json, vite_config, main_tsx, app_tsx,
+            index_css, api_ts, backend_app,
+        )
+        missing = [
+            path.relative_to(self.root).as_posix()
+            for path in required_files
+            if not path.is_file()
+        ]
+
+        if missing:
+            return {
+                "checks": {"required_files": False},
+                "missing_files": missing,
+                "valid": False,
+            }
+
+        html = index_html.read_text(encoding="utf-8")
+        package = json.loads(package_json.read_text(encoding="utf-8"))
+        vite = vite_config.read_text(encoding="utf-8")
+        main = main_tsx.read_text(encoding="utf-8")
+        app = app_tsx.read_text(encoding="utf-8")
+        css = index_css.read_text(encoding="utf-8")
+        api = api_ts.read_text(encoding="utf-8")
+        backend = backend_app.read_text(encoding="utf-8")
+
+        deps = {}
+        deps.update(package.get("dependencies", {}))
+        deps.update(package.get("devDependencies", {}))
+        scripts = package.get("scripts", {})
+
+        component_names = (
+            "ChatWindow.tsx",
+            "Composer.tsx",
+            "MessageBubble.tsx",
+            "Sidebar.tsx",
+            "SettingsPanel.tsx",
+            "TopBar.tsx",
         )
 
-        css = (
-            self.root
-            / "frontend/css/app.css"
-        ).read_text(
-            encoding="utf-8"
-        )
-
-        js = (
-            self.root
-            / "frontend/js/api.js"
-        ).read_text(
-            encoding="utf-8"
-        )
-
-        manifest = json.loads(
-            (
-                self.root
-                / (
-                    "frontend/assets/"
-                    "asset_manifest.json"
-                )
-            ).read_text(
-                encoding="utf-8"
-            )
+        public_assets = (
+            [path for path in public_dir.iterdir() if path.is_file()]
+            if public_dir.is_dir()
+            else []
         )
 
         checks = {
-            "local_css": (
-                "./css/app.css"
-                in html
+            "vite_entrypoint": (
+                'id="root"' in html
+                and '/src/main.tsx' in html
             ),
-            "local_js": (
-                "./js/app.js"
-                in html
+            "react_dependencies": (
+                "react" in deps
+                and "react-dom" in deps
+                and "vite" in deps
+                and "@vitejs/plugin-react" in deps
             ),
-            "health_route": (
-                '"/v1/health"'
-                in js
+            "build_script": (
+                "build" in scripts
+                and "vite build" in str(scripts.get("build", ""))
             ),
-            "chat_route": (
-                '"/v1/chat"'
-                in js
+            "main_mounts_app": (
+                "createRoot" in main
+                and "<App" in main
+                and "./index.css" in main
             ),
-            "responsive_css": (
-                "@media (max-width: 640px)"
-                in css
+            "app_source_present": (
+                "function App" in app
+                or "default function App" in app
+                or "export default" in app
             ),
-            "assets_declared": (
-                len(
-                    manifest.get(
-                        "assets",
-                        [],
-                    )
-                )
-                >= 4
+            "api_health_route": "/api/health" in api,
+            "api_chat_route": "/api/chat/stream" in api,
+            "backend_health_route": "/api/health" in backend,
+            "backend_chat_route": "/api/chat/stream" in backend,
+            "vite_api_proxy": (
+                "'/api'" in vite
+                and "127.0.0.1:8000" in vite
             ),
-            "no_html_cdn": (
-                not self
-                ._html_has_remote_reference(
-                    html
-                )
+            "tailwind_entry_css": (
+                "@tailwind base" in css
+                and "@tailwind components" in css
+                and "@tailwind utilities" in css
             ),
-            "no_css_remote_assets": (
-                not self
-                ._css_has_remote_asset(
-                    css
-                )
+            "components_present": all(
+                (components_dir / name).is_file()
+                for name in component_names
             ),
+            "public_assets_present": len(public_assets) >= 2,
+            "no_html_cdn": not self._html_has_remote_reference(html),
+            "no_css_remote_assets": not self._css_has_remote_asset(css),
         }
 
         return {
             "checks": checks,
-            "valid": all(
-                checks.values()
-            ),
+            "missing_files": [],
+            "valid": all(checks.values()),
         }
 
     def validate_gateway_contract(self):

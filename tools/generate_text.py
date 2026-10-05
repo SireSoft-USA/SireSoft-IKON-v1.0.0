@@ -65,10 +65,27 @@ def main():
         type=int,
         default=1337,
     )
+    parser.add_argument(
+        "--device",
+        choices=("auto", "cpu", "cuda"),
+        default="auto",
+    )
+    parser.add_argument(
+        "--cuda-device-index",
+        type=int,
+        default=0,
+    )
     args = parser.parse_args()
 
     enter_project_root()
     ns = load_inference_namespace()
+    compute_backend = ns.get("GPU_BACKEND")
+    if compute_backend is not None:
+        compute_backend.configure(
+            args.device,
+            args.cuda_device_index,
+            strict=(args.device == "cuda"),
+        )
 
     tokenizer_manager = ns[
         "build_tokenizer_manager"

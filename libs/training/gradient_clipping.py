@@ -34,8 +34,17 @@ class GlobalNormClipper:
             if not getattr(parameter, "requires_grad", True):
                 continue
 
-            for value in parameter.grad.flatten():
-                total += value * value
+            values = parameter.grad.flatten()
+            if (
+                "GPU_BACKEND" in globals()
+                and GPU_BACKEND is not None
+                and GPU_BACKEND.enabled()
+                and len(values) > 0
+            ):
+                total += GPU_BACKEND.sum_squares(values)
+            else:
+                for value in values:
+                    total += value * value
 
         return sqrt(total)
 
@@ -59,10 +68,17 @@ class GlobalNormClipper:
                 continue
 
             values = parameter.grad.flatten()
-            clipped = []
-
-            for value in values:
-                clipped.append(value * scale)
+            if (
+                "GPU_BACKEND" in globals()
+                and GPU_BACKEND is not None
+                and GPU_BACKEND.enabled()
+                and len(values) > 0
+            ):
+                clipped = GPU_BACKEND.scale(values, scale)
+            else:
+                clipped = []
+                for value in values:
+                    clipped.append(value * scale)
 
             parameter.grad = Tensor(
                 clipped,

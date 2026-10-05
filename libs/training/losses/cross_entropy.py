@@ -102,6 +102,28 @@ class CrossEntropyLoss:
                 "target count does not match logits rows"
             )
 
+        row_index = 0
+        while row_index < len(target_values):
+            target = target_values[row_index]
+            ignored = (
+                self.ignore_index is not None
+                and target == self.ignore_index
+            )
+            if not ignored and (target < 0 or target >= classes):
+                raise IndexError(
+                    "target class out of range at row " + str(row_index)
+                )
+            row_index += 1
+
+        if (
+            "GPU_BACKEND" in globals()
+            and GPU_BACKEND is not None
+            and GPU_BACKEND.enabled()
+        ):
+            return self._forward_cuda(
+                x, target_values, expected_shape, rows, classes
+            )
+
         source = x.data.flatten()
 
         probabilities = [0.0] * x.size
@@ -343,6 +365,76 @@ class CrossEntropyLoss:
                         in x.shape
                     ],
                 )
+            )
+
+        out._backward = _backward
+        return out
+
+    def _forward_cuda(self, x, target_values, expected_shape, rows, classes):
+        ignore_index = (
+            self.ignore_index
+            if self.ignore_index is not None
+            else -2147483647
+        )
+        probabilities, row_losses, active = GPU_BACKEND.cross_entropy_forward(
+            x.data.flatten(),
+            target_values,
+            rows,
+            classes,
+            ignore_index,
+            self.label_smoothing,
+        )
+        active_count = 0
+        total = 0.0
+        row = 0
+        while row < rows:
+            if active[row]:
+                active_count += 1
+            total += row_losses[row]
+            row += 1
+
+        if self.reduction == "none":
+            if x.ndim == 1:
+                output_tensor = Tensor([row_losses[0]], [])
+            else:
+                output_tensor = Tensor(row_losses, expected_shape)
+        elif self.reduction == "sum":
+            output_tensor = Tensor([total], [])
+        else:
+            if active_count == 0:
+                raise ValueError("mean cross entropy has no active targets")
+            output_tensor = Tensor([total / active_count], [])
+
+        out = Value(
+            output_tensor,
+            requires_grad=x.requires_grad,
+            _children=[x],
+            _op="cross_entropy",
+        )
+
+        def _backward():
+            if not x.requires_grad:
+                return
+            if self.reduction == "none":
+                upstream_rows = out.grad.flatten()
+                if x.ndim == 1:
+                    upstream_rows = [upstream_rows[0]]
+            else:
+                upstream_rows = [out.grad.flatten()[0]]
+
+            gradient = GPU_BACKEND.cross_entropy_backward(
+                probabilities,
+                target_values,
+                active,
+                upstream_rows,
+                rows,
+                classes,
+                self.label_smoothing,
+                active_count,
+                self.reduction,
+            )
+            x._accumulate(
+                Tensor(gradient, [dimension for dimension in x.shape])
             )
 
         out._backward = _backward

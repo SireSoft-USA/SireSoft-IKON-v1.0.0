@@ -121,6 +121,10 @@ Current validated repository snapshot:
 | Real preprocessing runner | **Available** |
 | Real tokenizer-training runner | **Available** |
 | Real model-training runner | **Available** |
+| Custom CUDA training backend | **Available** |
+| GPU training smoke test | **Available** |
+| Resumable batch checkpoints | **Available** |
+| Live training visualization | **Available** |
 | Real retrieval-index runner | **Available** |
 | Local generation runner | **Available** |
 | RAG chat runner | **Available** |
@@ -974,151 +978,91 @@ tests/
 
 ## Real Execution Guide
 
-The implementation modules are intentionally not all standalone scripts. Real work is executed through the production runners under `tools/`.
+The recommended runner is now the single end-to-end pipeline:
 
-Run all commands from the repository root:
-
-```powershell
-cd "D:\Nerd Stuff\Projects\Independant Chatbot"
+```bash
+python tools/run_real_pipeline.py
 ```
 
-### 1. Preprocess all datasets
+On the SireSoft server this defaults to strict CUDA mode and performs the complete build in sequence:
 
-```powershell
-python tools/preprocess_all.py
+1. custom CUDA backend build/check
+2. real miniature GPU-training verification
+3. TinyStories split-file reconstruction when required
+4. raw-to-canonical preprocessing for all datasets
+5. canonical dataset verification
+6. BPE tokenizer training
+7. real Transformer training on the selected device
+8. live terminal progress visualization
+9. periodic resumable batch checkpoints
+10. validation and complete-epoch checkpoints
+11. SireSoft retrieval/RAG index build
+12. final artifact verification
+
+For the Quadro P5000, the default CUDA architecture is `sm_61`. The custom backend is written in CUDA C/C++ and loaded with Python's standard-library `ctypes`; no PyTorch, TensorFlow, NumPy, CuPy or Numba is used.
+
+### GPU readiness test
+
+This test does not require the real datasets or tokenizer artifacts:
+
+```bash
+python tools/test_gpu_training.py --build-if-needed --arch sm_61
 ```
 
-The preprocessing runner now supports resume behavior:
+A successful result ends with `GPU TRAINING TEST: PASS` and verifies that the real miniature Transformer training step exercised the custom CUDA matrix multiplication, embedding, attention, LayerNorm, cross-entropy and AdamW kernels.
 
-- non-empty canonical outputs are **skipped by default**
-- unfinished datasets continue processing
-- use `--force` to rebuild
+CPU fallback validation:
 
-Example:
-
-```powershell
-python tools/preprocess_all.py --datasets movie-corpus --force
+```bash
+python tools/test_compute_backend.py --device cpu
+python tools/test_training_recovery.py
 ```
 
-Expected canonical outputs:
+### Model training visibility and recovery
+
+During training, the terminal displays a live progress line such as:
 
 ```text
-datasets/canonical/
-├── dailydialog.jsonl
-├── dolly.jsonl
-├── movie-corpus.jsonl
-├── siresoft.jsonl
-├── tinystories.jsonl
-└── openassistant.jsonl
+EPOCH 1/1 [############------------------] 1680/4074 41.24% loss=5.123450 avg=5.391820 lr=0.00082 elapsed=02:31:08 ETA=03:35:40 device=cuda
 ```
 
-### 2. Train the real BPE tokenizer
-
-Recommended first run:
-
-```powershell
-python tools/train_tokenizer.py --records-per-dataset 2000 --vocab-size 512 --min-frequency 2
-```
-
-Use every canonical record:
-
-```powershell
-python tools/train_tokenizer.py --records-per-dataset 0 --vocab-size 512 --min-frequency 2
-```
-
-Output:
+By default a resumable checkpoint is saved every 100 batches. The latest resume point is always written to:
 
 ```text
-model_store/manifests/sirellm_tokenizer.sltok
+model_store/checkpoints/sirellm-v1-progress.lbckpt
 ```
 
-### 3. Train the language model
-
-Recommended first real CPU run:
-
-```powershell
-python tools/train_model.py --records-per-dataset 250 --epochs 1 --batch-size 4 --sequence-length 64 --d-model 32 --layers 2 --heads 4 --d-ff 128 --learning-rate 0.001
-```
-
-This performs actual:
-
-- token encoding
-- sequence packing
-- forward propagation
-- cross-entropy calculation
-- automatic differentiation
-- backward propagation
-- gradient clipping
-- AdamW updates
-- learning-rate scheduling
-- validation
-- checkpoint persistence
-
-Expected outputs:
+Numbered step checkpoints are also retained, with the newest five kept by default. Per-batch training metrics are streamed to:
 
 ```text
-model_store/checkpoints/
-├── sirellm-v1-epoch-001.lbckpt
-└── sirellm-v1.lbckpt
+model_store/checkpoints/sirellm-v1-training.jsonl
 ```
 
-Resume another epoch:
+The complete pipeline automatically resumes the progress checkpoint when it exists. To intentionally ignore it and start a fresh training run:
 
-```powershell
-python tools/train_model.py --records-per-dataset 250 --epochs 1 --batch-size 4 --sequence-length 64 --d-model 32 --layers 2 --heads 4 --d-ff 128 --learning-rate 0.001 --resume model_store/checkpoints/sirellm-v1.lbckpt
+```bash
+python tools/run_real_pipeline.py --fresh
 ```
 
-### 4. Generate text from the trained checkpoint
+To change checkpoint frequency:
 
-```powershell
-python tools/generate_text.py "SireSoft builds" --max-new-tokens 32
+```bash
+python tools/run_real_pipeline.py --checkpoint-every 50
 ```
 
-### 5. Build the SireSoft retrieval index
+To run the full pipeline on CPU intentionally:
 
-```powershell
-python tools/build_retrieval.py
+```bash
+python tools/run_real_pipeline.py --device cpu
 ```
 
-Expected output:
+To start the FastAPI/React application after every artifact is built:
 
-```text
-vector_store/indexes/siresoft.slretr
+```bash
+python tools/run_real_pipeline.py --start-app
 ```
 
-### 6. Train with a larger RAG-capable context window
-
-A short `64`-token training context is useful for proving the training path. RAG prompts generally need more room.
-
-Example:
-
-```powershell
-python tools/train_model.py --records-per-dataset 250 --epochs 1 --batch-size 2 --sequence-length 256 --d-model 32 --layers 2 --heads 4 --d-ff 128 --learning-rate 0.001
-```
-
-### 7. Run interactive RAG chat
-
-```powershell
-python tools/chat_rag.py
-```
-
-Single-question mode:
-
-```powershell
-python tools/chat_rag.py "What services does SireSoft provide?" --max-new-tokens 16
-```
-
-### 8. Run the complete artifact pipeline
-
-```powershell
-python tools/run_real_pipeline.py --records-per-dataset 250 --tokenizer-records-per-dataset 2000 --epochs 1 --batch-size 4 --sequence-length 64
-```
-
-Skip preprocessing when canonical files already exist:
-
-```powershell
-python tools/run_real_pipeline.py --skip-preprocessing --records-per-dataset 250 --epochs 1
-```
+For individual runners, see `REAL_RUN.md` and `GPU_RUN.md`.
 
 ---
 
@@ -1131,6 +1075,8 @@ The real execution pipeline generates local state that should **not** be committ
 | Canonical datasets | `datasets/canonical/*.jsonl` | Normalized training/RAG records |
 | Tokenizer state | `model_store/manifests/sirellm_tokenizer.sltok` | Learned BPE vocabulary/merges |
 | Model checkpoint | `model_store/checkpoints/*.lbckpt` | Learned Transformer parameters |
+| Progress checkpoint | `model_store/checkpoints/sirellm-v1-progress.lbckpt` | Mid-epoch resumable training state |
+| Training metrics stream | `model_store/checkpoints/sirellm-v1-training.jsonl` | Live per-batch loss/progress/ETA records |
 | Retrieval index | `vector_store/indexes/*.slretr` | Persisted SireSoft retrieval state |
 | Runtime state | `runtime/state/` | Local service/runtime state |
 | Logs | runtime/service log paths | Operational diagnostics |
@@ -1328,14 +1274,15 @@ This architecture makes the implementation educationally and technically transpa
 
 ## Known Operational Characteristics
 
-Because the core numerical and Transformer stack is handwritten Python:
+The project now supports two compute paths while retaining the handwritten model/training logic:
 
-- training is CPU-intensive
-- large TinyStories/OpenAssistant runs can take substantial time
-- larger context windows increase attention cost sharply
-- begin with bounded real-data runs
-- prove checkpoint save/load before scaling
-- scale dataset size before aggressively scaling model dimensions
+- `cuda` routes supported heavy tensor, attention, loss and optimizer operations through the custom CUDA backend
+- `cpu` preserves the original handwritten Python implementation as a fallback and test path
+- the CUDA backend uses project-owned kernels and Python `ctypes`, not a third-party ML framework
+- the current CUDA backend copies Python-owned tensor data into GPU memory for kernel calls, so it is functionally GPU-backed but is not expected to match highly optimized framework performance yet
+- larger context windows still increase attention cost sharply
+- periodic checkpoints and live progress output should remain enabled for long runs
+- validate GPU execution with `tools/test_gpu_training.py` before scaling dataset/model size
 
 Recommended scaling order:
 

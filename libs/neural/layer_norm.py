@@ -65,6 +65,13 @@ class LayerNorm(Layer):
         width = self.normalized_size
         rows = x.size // width
 
+        if (
+            "GPU_BACKEND" in globals()
+            and GPU_BACKEND is not None
+            and GPU_BACKEND.enabled()
+        ):
+            return self._forward_cuda(x, x_values, rows, width)
+
         output = [0.0] * x.size
         means = [0.0] * rows
         inv_stds = [0.0] * rows
@@ -220,3 +227,67 @@ class LayerNorm(Layer):
 
         out._backward = _backward
         return out
+    def _forward_cuda(self, x, x_values, rows, width):
+        if self.affine:
+            gamma_values = self.gamma.data.flatten()
+            beta_values = self.beta.data.flatten()
+        else:
+            gamma_values = []
+            beta_values = []
+
+        output, normalized, inv_stds = GPU_BACKEND.layernorm_forward(
+            x_values,
+            gamma_values,
+            beta_values,
+            rows,
+            width,
+            self.epsilon,
+            self.affine,
+        )
+
+        children = [x]
+        if self.affine:
+            children.append(self.gamma)
+            children.append(self.beta)
+
+        requires = x.requires_grad
+        if self.affine:
+            requires = (
+                requires
+                or self.gamma.requires_grad
+                or self.beta.requires_grad
+            )
+
+        out = Value(
+            Tensor(output, [dimension for dimension in x.shape]),
+            requires_grad=requires,
+            _children=children,
+            _op="layer_norm",
+        )
+
+        def _backward():
+            upstream = out.grad.flatten()
+            dx, dgamma, dbeta = GPU_BACKEND.layernorm_backward(
+                upstream,
+                normalized,
+                inv_stds,
+                gamma_values,
+                rows,
+                width,
+                self.affine,
+            )
+
+            if x.requires_grad:
+                x._accumulate(
+                    Tensor(dx, [dimension for dimension in x.shape])
+                )
+
+            if self.affine and self.gamma.requires_grad:
+                self.gamma._accumulate(Tensor(dgamma, [width]))
+
+            if self.affine and self.beta.requires_grad:
+                self.beta._accumulate(Tensor(dbeta, [width]))
+
+        out._backward = _backward
+        return out
+

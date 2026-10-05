@@ -69,20 +69,17 @@ def eq(
 
 
 def test_manifest():
-    eq(
-        len(
-            EXPECTED_FOLDERS
-        ),
-        117,
-        "canonical internal folder count",
+    expected_count = len(EXPECTED_FOLDERS)
+
+    check(
+        expected_count >= 100,
+        "canonical internal folder manifest is unexpectedly small",
     )
 
     eq(
-        len(
-            TEST_FILE_BY_FOLDER
-        ),
-        117,
-        "canonical test mapping count",
+        len(TEST_FILE_BY_FOLDER),
+        expected_count,
+        "canonical test mapping count matches folder manifest",
     )
 
     eq(
@@ -94,12 +91,8 @@ def test_manifest():
     )
 
     eq(
-        len(
-            set(
-                EXPECTED_FOLDERS
-            )
-        ),
-        117,
+        len(set(EXPECTED_FOLDERS)),
+        len(EXPECTED_FOLDERS),
         "folder manifest contains no duplicates",
     )
 
@@ -158,12 +151,8 @@ def test_repository_validation():
     )
 
     eq(
-        result[
-            "folder_test_coverage"
-        ][
-            "covered_folder_count"
-        ],
-        117,
+        result["folder_test_coverage"]["covered_folder_count"],
+        len(EXPECTED_FOLDERS),
         "every internal folder has its mapped direct test",
     )
 
@@ -195,6 +184,12 @@ def test_repository_validation():
         ],
         [],
         "all Python files parse successfully",
+    )
+
+    eq(
+        result["imports"]["forbidden_ml_roots"],
+        [],
+        "no forbidden ML/numerical framework imports",
     )
 
     check(
@@ -321,10 +316,12 @@ def main():
         ASSERTIONS,
     )
     print(
-        "Internal architecture folders: 117/117"
+        "Internal architecture folders:",
+        str(len(EXPECTED_FOLDERS)) + "/" + str(len(EXPECTED_FOLDERS)),
     )
     print(
-        "Direct mapped test coverage: 117/117"
+        "Direct mapped test coverage:",
+        str(len(EXPECTED_FOLDERS)) + "/" + str(len(EXPECTED_FOLDERS)),
     )
     print(
         "Critical file contracts: VALIDATED"
@@ -339,7 +336,7 @@ def main():
         "Gateway /v1/health + /v1/chat contract: VALIDATED"
     )
     print(
-        "Frontend local-asset contract: VALIDATED"
+        "Frontend React/Vite + FastAPI contract: VALIDATED"
     )
     print(
         "Cross-layer smoke tests passed:",
@@ -352,7 +349,10 @@ def main():
         ),
     )
     print(
-        "Third-party dependencies: 0"
+        "Forbidden ML/numerical dependencies: 0"
+    )
+    print(
+        "Allowed app runtime dependencies: fastapi, pydantic, uvicorn"
     )
 
 

@@ -206,33 +206,53 @@ class MultiHeadAttention(Layer):
             batch_size = source.shape[0]
             sequence_length = source.shape[1]
 
-        output = []
         head_start = head_index * self.head_dim
 
-        batch = 0
-        while batch < batch_size:
-            position = 0
+        if (
+            "GPU_BACKEND" in globals()
+            and GPU_BACKEND is not None
+            and GPU_BACKEND.enabled()
+        ):
+            output = GPU_BACKEND.extract_head(
+                source_values,
+                batch_size,
+                sequence_length,
+                self.d_model,
+                head_start,
+                self.head_dim,
+            )
+        else:
+            output = []
 
-            while position < sequence_length:
-                d = 0
+        if not (
+            "GPU_BACKEND" in globals()
+            and GPU_BACKEND is not None
+            and GPU_BACKEND.enabled()
+        ):
+            batch = 0
+            while batch < batch_size:
+                position = 0
 
-                while d < self.head_dim:
-                    source_index = (
-                        (batch * sequence_length + position)
-                        * self.d_model
-                        + head_start
-                        + d
-                    )
+                while position < sequence_length:
+                    d = 0
 
-                    output.append(
-                        source_values[source_index]
-                    )
+                    while d < self.head_dim:
+                        source_index = (
+                            (batch * sequence_length + position)
+                            * self.d_model
+                            + head_start
+                            + d
+                        )
 
-                    d += 1
+                        output.append(
+                            source_values[source_index]
+                        )
 
-                position += 1
+                        d += 1
 
-            batch += 1
+                    position += 1
+
+                batch += 1
 
         if source.ndim == 2:
             shape = [
@@ -258,6 +278,24 @@ class MultiHeadAttention(Layer):
                 return
 
             upstream = out.grad.flatten()
+            if (
+                "GPU_BACKEND" in globals()
+                and GPU_BACKEND is not None
+                and GPU_BACKEND.enabled()
+            ):
+                gradient = GPU_BACKEND.scatter_head(
+                    upstream,
+                    batch_size,
+                    sequence_length,
+                    self.d_model,
+                    head_start,
+                    self.head_dim,
+                )
+                source._accumulate(
+                    Tensor(gradient, [dimension for dimension in source.shape])
+                )
+                return
+
             gradient = [0.0] * source.size
             cursor = 0
 
@@ -318,57 +356,78 @@ class MultiHeadAttention(Layer):
         else:
             raise ValueError("head tensors must be rank 2 or 3")
 
-        values = [0.0] * (
-            batch_size
-            * sequence_length
-            * self.d_model
+        use_cuda = (
+            "GPU_BACKEND" in globals()
+            and GPU_BACKEND is not None
+            and GPU_BACKEND.enabled()
         )
 
-        head_index = 0
-
-        while head_index < self.num_heads:
-            head = heads[head_index]
-
-            if head.shape[-1] != self.head_dim:
-                raise ValueError("head dimension mismatch")
-
-            head_values = head.data.flatten()
-            cursor = 0
-            head_start = (
-                head_index
-                * self.head_dim
+        if use_cuda:
+            flat_heads = []
+            head_index = 0
+            while head_index < self.num_heads:
+                flat_heads.extend(heads[head_index].data.flatten())
+                head_index += 1
+            values = GPU_BACKEND.concat_heads(
+                flat_heads,
+                batch_size,
+                sequence_length,
+                self.num_heads,
+                self.head_dim,
+            )
+        else:
+            values = [0.0] * (
+                batch_size
+                * sequence_length
+                * self.d_model
             )
 
-            batch = 0
-            while batch < batch_size:
-                position = 0
+        if not use_cuda:
+            head_index = 0
 
-                while position < sequence_length:
-                    dimension = 0
+            while head_index < self.num_heads:
+                head = heads[head_index]
 
-                    while dimension < self.head_dim:
-                        target_index = (
-                            (
-                                batch * sequence_length
-                                + position
+                if head.shape[-1] != self.head_dim:
+                    raise ValueError("head dimension mismatch")
+
+                head_values = head.data.flatten()
+                cursor = 0
+                head_start = (
+                    head_index
+                    * self.head_dim
+                )
+
+                batch = 0
+                while batch < batch_size:
+                    position = 0
+
+                    while position < sequence_length:
+                        dimension = 0
+
+                        while dimension < self.head_dim:
+                            target_index = (
+                                (
+                                    batch * sequence_length
+                                    + position
+                                )
+                                * self.d_model
+                                + head_start
+                                + dimension
                             )
-                            * self.d_model
-                            + head_start
-                            + dimension
-                        )
 
-                        values[target_index] = (
-                            head_values[cursor]
-                        )
+                            values[target_index] = (
+                                head_values[cursor]
+                            )
 
-                        cursor += 1
-                        dimension += 1
+                            cursor += 1
+                            dimension += 1
 
-                    position += 1
+                        position += 1
 
-                batch += 1
+                    batch += 1
 
-            head_index += 1
+                head_index += 1
 
         if first.ndim == 2:
             output_shape = [
@@ -398,6 +457,28 @@ class MultiHeadAttention(Layer):
 
         def _backward():
             upstream = out.grad.flatten()
+
+            if use_cuda:
+                head_idx = 0
+                while head_idx < self.num_heads:
+                    head_value = heads[head_idx]
+                    if head_value.requires_grad:
+                        gradient = GPU_BACKEND.split_head_grad(
+                            upstream,
+                            batch_size,
+                            sequence_length,
+                            self.num_heads,
+                            self.head_dim,
+                            head_idx,
+                        )
+                        head_value._accumulate(
+                            Tensor(
+                                gradient,
+                                [dimension for dimension in head_value.shape],
+                            )
+                        )
+                    head_idx += 1
+                return
 
             head_idx = 0
 

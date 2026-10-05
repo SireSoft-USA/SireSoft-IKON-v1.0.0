@@ -6,6 +6,15 @@ differentiation is deliberately kept out of this layer and will be added in
 """
 
 
+
+
+def _tensor_gpu_enabled():
+    return (
+        "GPU_BACKEND" in globals()
+        and GPU_BACKEND is not None
+        and GPU_BACKEND.enabled()
+    )
+
 class Tensor:
     def __init__(self, data, shape=None):
         if isinstance(data, Tensor):
@@ -141,36 +150,79 @@ class Tensor:
 
     def add(self, other):
         if isinstance(other, (int, float)):
+            if _tensor_gpu_enabled():
+                values = GPU_BACKEND.binary_broadcast(
+                    self._data, self._shape, [float(other)], [], self._shape, "add"
+                )
+                return Tensor(values, self._shape)
             return Tensor([value + other for value in self._data], self._shape)
         other = self._validate_other(other)
+        if _tensor_gpu_enabled():
+            values = GPU_BACKEND.binary_broadcast(
+                self._data, self._shape, other._data, other._shape, self._shape, "add"
+            )
+            return Tensor(values, self._shape)
         return Tensor([self._data[i] + other._data[i] for i in range(self.size)], self._shape)
 
     def subtract(self, other):
         if isinstance(other, (int, float)):
+            if _tensor_gpu_enabled():
+                values = GPU_BACKEND.binary_broadcast(
+                    self._data, self._shape, [float(other)], [], self._shape, "subtract"
+                )
+                return Tensor(values, self._shape)
             return Tensor([value - other for value in self._data], self._shape)
         other = self._validate_other(other)
+        if _tensor_gpu_enabled():
+            values = GPU_BACKEND.binary_broadcast(
+                self._data, self._shape, other._data, other._shape, self._shape, "subtract"
+            )
+            return Tensor(values, self._shape)
         return Tensor([self._data[i] - other._data[i] for i in range(self.size)], self._shape)
 
     def multiply(self, other):
         if isinstance(other, (int, float)):
+            if _tensor_gpu_enabled():
+                values = GPU_BACKEND.binary_broadcast(
+                    self._data, self._shape, [float(other)], [], self._shape, "multiply"
+                )
+                return Tensor(values, self._shape)
             return Tensor([value * other for value in self._data], self._shape)
         other = self._validate_other(other)
+        if _tensor_gpu_enabled():
+            values = GPU_BACKEND.binary_broadcast(
+                self._data, self._shape, other._data, other._shape, self._shape, "multiply"
+            )
+            return Tensor(values, self._shape)
         return Tensor([self._data[i] * other._data[i] for i in range(self.size)], self._shape)
 
     def divide(self, other):
         if isinstance(other, (int, float)):
             if other == 0:
                 raise ZeroDivisionError("division by zero")
+            if _tensor_gpu_enabled():
+                values = GPU_BACKEND.binary_broadcast(
+                    self._data, self._shape, [float(other)], [], self._shape, "divide"
+                )
+                return Tensor(values, self._shape)
             return Tensor([value / other for value in self._data], self._shape)
         other = self._validate_other(other)
+        for value in other._data:
+            if value == 0:
+                raise ZeroDivisionError("division by zero")
+        if _tensor_gpu_enabled():
+            values = GPU_BACKEND.binary_broadcast(
+                self._data, self._shape, other._data, other._shape, self._shape, "divide"
+            )
+            return Tensor(values, self._shape)
         result = []
         for i in range(self.size):
-            if other._data[i] == 0:
-                raise ZeroDivisionError("division by zero")
             result.append(self._data[i] / other._data[i])
         return Tensor(result, self._shape)
 
     def sum(self):
+        if _tensor_gpu_enabled() and self.size > 0:
+            return GPU_BACKEND.sum(self._data)
         total = 0.0
         for value in self._data:
             total += value
@@ -188,6 +240,11 @@ class Tensor:
         if self.ndim != 2:
             raise ValueError("transpose2d requires a rank-2 tensor")
         rows, cols = self._shape
+        if _tensor_gpu_enabled() and self.size > 0:
+            return Tensor(
+                GPU_BACKEND.transpose2d(self._data, rows, cols),
+                [cols, rows],
+            )
         values = []
         for j in range(cols):
             for i in range(rows):
@@ -203,6 +260,11 @@ class Tensor:
         right_rows, right_cols = other._shape
         if left_cols != right_rows:
             raise ValueError("inner tensor dimensions must match")
+        if _tensor_gpu_enabled() and left_rows * right_cols > 0:
+            values = GPU_BACKEND.matmul(
+                self._data, other._data, left_rows, left_cols, right_cols
+            )
+            return Tensor(values, [left_rows, right_cols])
         result = Tensor.zeros([left_rows, right_cols])
         for i in range(left_rows):
             for k in range(left_cols):

@@ -194,3 +194,10 @@ sandbox/
 
 # Original TinyStories canonical file exceeds GitHub LFS per-file limit
 datasets/canonical/tinystories.jsonl
+# -------------------- Custom CUDA build output --------------------
+libs/core/gpu/*.so
+libs/core/gpu/*.dll
+libs/core/gpu/*.dylib
+
+# Live per-batch training metrics
+model_store/checkpoints/*-training.jsonl

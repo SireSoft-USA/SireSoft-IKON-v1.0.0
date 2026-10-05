@@ -60,6 +60,16 @@ class ScaledDotProductAttention:
         if dimension <= 0:
             raise ValueError("attention dimension must be positive")
 
+        if (
+            "GPU_BACKEND" in globals()
+            and GPU_BACKEND is not None
+            and GPU_BACKEND.enabled()
+        ):
+            return self._forward_cuda(
+                query, key, value, mask,
+                batch_size, query_length, key_length, dimension,
+            )
+
         scale = 1.0 / sqrt(float(dimension))
 
         q_values = query.data.flatten()
@@ -375,6 +385,117 @@ class ScaledDotProductAttention:
                         d_value,
                         [dimension for dimension in value.shape],
                     )
+                )
+
+        out._backward = _backward
+        return out
+
+    def _forward_cuda(
+        self,
+        query,
+        key,
+        value,
+        mask,
+        batch_size,
+        query_length,
+        key_length,
+        dimension,
+    ):
+        q_values = query.data.flatten()
+        k_values = key.data.flatten()
+        v_values = value.data.flatten()
+
+        mask_values = None
+        if mask is not None:
+            mask_values = []
+            q_index = 0
+            while q_index < query_length:
+                k_index = 0
+                while k_index < key_length:
+                    mask_values.append(
+                        1 if self._allowed(q_index, k_index, mask) else 0
+                    )
+                    k_index += 1
+                q_index += 1
+
+        output, flat_weights = GPU_BACKEND.attention_forward(
+            q_values,
+            k_values,
+            v_values,
+            batch_size,
+            query_length,
+            key_length,
+            dimension,
+            mask_values=mask_values,
+            causal=self.causal and mask is None,
+        )
+
+        weights = []
+        cursor = 0
+        batch = 0
+        while batch < batch_size:
+            batch_rows = []
+            query_index = 0
+            while query_index < query_length:
+                row = flat_weights[cursor:cursor + key_length]
+                batch_rows.append(row)
+                cursor += key_length
+                query_index += 1
+            weights.append(batch_rows)
+            batch += 1
+
+        self.last_weights = weights
+
+        if query.ndim == 2:
+            output_shape = [query_length, dimension]
+        else:
+            output_shape = [batch_size, query_length, dimension]
+
+        requires_grad = (
+            query.requires_grad
+            or key.requires_grad
+            or value.requires_grad
+        )
+
+        out = Value(
+            Tensor(output, output_shape),
+            requires_grad=requires_grad,
+            _children=[query, key, value],
+            _op="scaled_dot_product_attention",
+        )
+
+        def _backward():
+            if not (
+                query.requires_grad
+                or key.requires_grad
+                or value.requires_grad
+            ):
+                return
+
+            upstream = out.grad.flatten()
+            d_query, d_key, d_value = GPU_BACKEND.attention_backward(
+                q_values,
+                k_values,
+                v_values,
+                flat_weights,
+                upstream,
+                batch_size,
+                query_length,
+                key_length,
+                dimension,
+            )
+
+            if query.requires_grad:
+                query._accumulate(
+                    Tensor(d_query, [d for d in query.shape])
+                )
+            if key.requires_grad:
+                key._accumulate(
+                    Tensor(d_key, [d for d in key.shape])
+                )
+            if value.requires_grad:
+                value._accumulate(
+                    Tensor(d_value, [d for d in value.shape])
                 )
 
         out._backward = _backward

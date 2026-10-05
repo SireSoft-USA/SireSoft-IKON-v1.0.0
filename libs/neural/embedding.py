@@ -50,6 +50,13 @@ class Embedding(Layer):
     def forward(self, token_ids):
         flat_ids, prefix_shape = self._flatten_ids(token_ids)
 
+        if (
+            "GPU_BACKEND" in globals()
+            and GPU_BACKEND is not None
+            and GPU_BACKEND.enabled()
+        ):
+            return self._forward_cuda(flat_ids, prefix_shape)
+
         output_values = []
 
         i = 0
@@ -108,6 +115,46 @@ class Embedding(Layer):
                 row_index += 1
 
             self.weight._accumulate(gradient)
+
+        out._backward = _backward
+        return out
+
+    def _forward_cuda(self, flat_ids, prefix_shape):
+        i = 0
+        while i < len(flat_ids):
+            token_id = flat_ids[i]
+            if token_id < 0 or token_id >= self.num_embeddings:
+                raise IndexError("embedding token id out of range")
+            i += 1
+
+        output_values = GPU_BACKEND.embedding_forward(
+            self.weight.data.flatten(),
+            flat_ids,
+            self.num_embeddings,
+            self.embedding_dim,
+        )
+        output_shape = prefix_shape + [self.embedding_dim]
+        out = Value(
+            Tensor(output_values, output_shape),
+            requires_grad=self.weight.requires_grad,
+            _children=[self.weight],
+            _op="embedding_gather",
+        )
+
+        def _backward():
+            if not self.weight.requires_grad:
+                return
+            padding = self.padding_idx if self.padding_idx is not None else -1
+            gradient = GPU_BACKEND.embedding_backward(
+                out.grad.flatten(),
+                flat_ids,
+                self.num_embeddings,
+                self.embedding_dim,
+                padding,
+            )
+            self.weight._accumulate(
+                Tensor(gradient, [self.num_embeddings, self.embedding_dim])
+            )
 
         out._backward = _backward
         return out

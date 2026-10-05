@@ -126,6 +126,28 @@ def _binary_tensor(left, right, mode):
     right_values = right.flatten()
     left_shape = _shape_list(left)
     right_shape = _shape_list(right)
+
+    if mode == "divide":
+        for value in right_values:
+            if value == 0:
+                raise ZeroDivisionError("division by zero")
+
+    if (
+        "GPU_BACKEND" in globals()
+        and GPU_BACKEND is not None
+        and GPU_BACKEND.enabled()
+        and output_size > 0
+    ):
+        values = GPU_BACKEND.binary_broadcast(
+            left_values,
+            left_shape,
+            right_values,
+            right_shape,
+            output_shape,
+            mode,
+        )
+        return Tensor(values, output_shape)
+
     values = [0.0] * output_size
 
     index = 0

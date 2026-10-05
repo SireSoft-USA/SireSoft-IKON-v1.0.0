@@ -6,6 +6,14 @@ There are no imports and no external numerical libraries.
 """
 
 
+def _value_gpu_enabled():
+    return (
+        "GPU_BACKEND" in globals()
+        and GPU_BACKEND is not None
+        and GPU_BACKEND.enabled()
+    )
+
+
 class Value:
     """A differentiable tensor node in a dynamic computation graph."""
 
@@ -139,29 +147,36 @@ class Value:
     def power(self, exponent):
         if not isinstance(exponent, (int, float)):
             raise TypeError("power currently requires a numeric constant exponent")
-        values = self.data.flatten()
-        output = [0.0] * len(values)
-        index = 0
-        while index < len(values):
-            output[index] = power(values[index], exponent)
-            index += 1
+        source = self.data.flatten()
+        if _value_gpu_enabled() and len(source) > 0:
+            output = GPU_BACKEND.power(source, exponent)
+        else:
+            output = [0.0] * len(source)
+            index = 0
+            while index < len(source):
+                output[index] = power(source[index], exponent)
+                index += 1
         out = Value(Tensor(output, [d for d in self.data.shape]), self.requires_grad, _children=[self], _op=POWER.name)
 
         def _backward():
             if not self.requires_grad:
                 return
-            source = self.data.flatten()
             upstream = out.grad.flatten()
-            local = [0.0] * len(source)
-            i = 0
-            while i < len(source):
-                if exponent == 0:
-                    derivative = 0.0
-                else:
-                    derivative = exponent * power(source[i], exponent - 1)
-                local[i] = upstream[i] * derivative
-                i += 1
-            self._accumulate(Tensor(local, [d for d in self.data.shape]))
+            if _value_gpu_enabled() and len(source) > 0:
+                gradient = GPU_BACKEND.activation_backward(
+                    source, output, upstream, "power", exponent
+                )
+            else:
+                gradient = [0.0] * len(source)
+                i = 0
+                while i < len(source):
+                    if exponent == 0:
+                        derivative = 0.0
+                    else:
+                        derivative = exponent * power(source[i], exponent - 1)
+                    gradient[i] = upstream[i] * derivative
+                    i += 1
+            self._accumulate(Tensor(gradient, [d for d in self.data.shape]))
 
         out._backward = _backward
         return out
@@ -234,56 +249,83 @@ class Value:
 
     def exp(self):
         source = self.data.flatten()
-        values = [0.0] * len(source)
-        index = 0
-        while index < len(source):
-            values[index] = exp(source[index])
-            index += 1
+        if _value_gpu_enabled() and len(source) > 0:
+            values = GPU_BACKEND.unary(source, "exp")
+        else:
+            values = [0.0] * len(source)
+            index = 0
+            while index < len(source):
+                values[index] = exp(source[index])
+                index += 1
         result = Tensor(values, [d for d in self.data.shape])
         out = Value(result, self.requires_grad, _children=[self], _op=EXP.name)
 
         def _backward():
             if self.requires_grad:
-                self._accumulate(_binary_tensor(out.grad, out.data, "multiply"))
+                upstream = out.grad.flatten()
+                if _value_gpu_enabled() and len(source) > 0:
+                    gradient = GPU_BACKEND.activation_backward(
+                        source, values, upstream, "exp"
+                    )
+                    self._accumulate(Tensor(gradient, [d for d in self.data.shape]))
+                else:
+                    self._accumulate(_binary_tensor(out.grad, out.data, "multiply"))
 
         out._backward = _backward
         return out
 
     def log(self):
         source = self.data.flatten()
-        values = [0.0] * len(source)
-        index = 0
-        while index < len(source):
-            values[index] = log(source[index])
-            index += 1
+        if _value_gpu_enabled() and len(source) > 0:
+            values = GPU_BACKEND.unary(source, "log")
+        else:
+            values = [0.0] * len(source)
+            index = 0
+            while index < len(source):
+                values[index] = log(source[index])
+                index += 1
         out = Value(Tensor(values, [d for d in self.data.shape]), self.requires_grad, _children=[self], _op=LOG.name)
 
         def _backward():
             if self.requires_grad:
-                self._accumulate(_binary_tensor(out.grad, self.data, "divide"))
+                upstream = out.grad.flatten()
+                if _value_gpu_enabled() and len(source) > 0:
+                    gradient = GPU_BACKEND.activation_backward(
+                        source, values, upstream, "log"
+                    )
+                    self._accumulate(Tensor(gradient, [d for d in self.data.shape]))
+                else:
+                    self._accumulate(_binary_tensor(out.grad, self.data, "divide"))
 
         out._backward = _backward
         return out
 
     def tanh(self):
         source = self.data.flatten()
-        values = [0.0] * len(source)
-        index = 0
-        while index < len(source):
-            values[index] = tanh(source[index])
-            index += 1
+        if _value_gpu_enabled() and len(source) > 0:
+            values = GPU_BACKEND.unary(source, "tanh")
+        else:
+            values = [0.0] * len(source)
+            index = 0
+            while index < len(source):
+                values[index] = tanh(source[index])
+                index += 1
         out = Value(Tensor(values, [d for d in self.data.shape]), self.requires_grad, _children=[self], _op=TANH.name)
 
         def _backward():
             if not self.requires_grad:
                 return
-            out_values = out.data.flatten()
             upstream = out.grad.flatten()
-            gradient = [0.0] * len(out_values)
-            i = 0
-            while i < len(out_values):
-                gradient[i] = upstream[i] * (1.0 - out_values[i] * out_values[i])
-                i += 1
+            if _value_gpu_enabled() and len(source) > 0:
+                gradient = GPU_BACKEND.activation_backward(
+                    source, values, upstream, "tanh"
+                )
+            else:
+                gradient = [0.0] * len(values)
+                i = 0
+                while i < len(values):
+                    gradient[i] = upstream[i] * (1.0 - values[i] * values[i])
+                    i += 1
             self._accumulate(Tensor(gradient, [d for d in self.data.shape]))
 
         out._backward = _backward
@@ -291,24 +333,31 @@ class Value:
 
     def sigmoid(self):
         source = self.data.flatten()
-        values = [0.0] * len(source)
-        index = 0
-        while index < len(source):
-            values[index] = sigmoid(source[index])
-            index += 1
+        if _value_gpu_enabled() and len(source) > 0:
+            values = GPU_BACKEND.unary(source, "sigmoid")
+        else:
+            values = [0.0] * len(source)
+            index = 0
+            while index < len(source):
+                values[index] = sigmoid(source[index])
+                index += 1
         out = Value(Tensor(values, [d for d in self.data.shape]), self.requires_grad, _children=[self], _op=SIGMOID.name)
 
         def _backward():
             if not self.requires_grad:
                 return
-            out_values = out.data.flatten()
             upstream = out.grad.flatten()
-            gradient = [0.0] * len(out_values)
-            i = 0
-            while i < len(out_values):
-                s = out_values[i]
-                gradient[i] = upstream[i] * s * (1.0 - s)
-                i += 1
+            if _value_gpu_enabled() and len(source) > 0:
+                gradient = GPU_BACKEND.activation_backward(
+                    source, values, upstream, "sigmoid"
+                )
+            else:
+                gradient = [0.0] * len(values)
+                i = 0
+                while i < len(values):
+                    s = values[i]
+                    gradient[i] = upstream[i] * s * (1.0 - s)
+                    i += 1
             self._accumulate(Tensor(gradient, [d for d in self.data.shape]))
 
         out._backward = _backward
@@ -316,22 +365,30 @@ class Value:
 
     def relu(self):
         source = self.data.flatten()
-        values = [0.0] * len(source)
-        index = 0
-        while index < len(source):
-            values[index] = source[index] if source[index] > 0.0 else 0.0
-            index += 1
+        if _value_gpu_enabled() and len(source) > 0:
+            values = GPU_BACKEND.unary(source, "relu")
+        else:
+            values = [0.0] * len(source)
+            index = 0
+            while index < len(source):
+                values[index] = source[index] if source[index] > 0.0 else 0.0
+                index += 1
         out = Value(Tensor(values, [d for d in self.data.shape]), self.requires_grad, _children=[self], _op=RELU.name)
 
         def _backward():
             if not self.requires_grad:
                 return
             upstream = out.grad.flatten()
-            gradient = [0.0] * len(source)
-            i = 0
-            while i < len(source):
-                gradient[i] = upstream[i] if source[i] > 0.0 else 0.0
-                i += 1
+            if _value_gpu_enabled() and len(source) > 0:
+                gradient = GPU_BACKEND.activation_backward(
+                    source, values, upstream, "relu"
+                )
+            else:
+                gradient = [0.0] * len(source)
+                i = 0
+                while i < len(source):
+                    gradient[i] = upstream[i] if source[i] > 0.0 else 0.0
+                    i += 1
             self._accumulate(Tensor(gradient, [d for d in self.data.shape]))
 
         out._backward = _backward

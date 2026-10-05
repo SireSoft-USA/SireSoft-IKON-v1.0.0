@@ -79,56 +79,76 @@ class RotaryEmbedding:
             sequence_length = x.shape[1]
 
         source = x.data.flatten()
-        output = [0.0] * len(source)
 
-        batch = 0
-        while batch < batch_size:
-            position = 0
+        if (
+            "GPU_BACKEND" in globals()
+            and GPU_BACKEND is not None
+            and GPU_BACKEND.enabled()
+        ):
+            output = GPU_BACKEND.rope_forward(
+                source,
+                batch_size,
+                sequence_length,
+                self.head_dim,
+                position_offset,
+                self.base,
+            )
+        else:
+            output = [0.0] * len(source)
 
-            while position < sequence_length:
-                absolute_position = position + position_offset
-                pair = 0
+        if not (
+            "GPU_BACKEND" in globals()
+            and GPU_BACKEND is not None
+            and GPU_BACKEND.enabled()
+        ):
+            batch = 0
+            while batch < batch_size:
+                position = 0
 
-                while pair < self.head_dim // 2:
-                    even_dimension = 2 * pair
-                    odd_dimension = even_dimension + 1
-                    exponent = (2.0 * pair) / self.head_dim
-                    angle = absolute_position / (self.base ** exponent)
+                while position < sequence_length:
+                    absolute_position = position + position_offset
+                    pair = 0
 
-                    cosine = _rope_cos(angle)
-                    sine = _rope_sin(angle)
+                    while pair < self.head_dim // 2:
+                        even_dimension = 2 * pair
+                        odd_dimension = even_dimension + 1
+                        exponent = (2.0 * pair) / self.head_dim
+                        angle = absolute_position / (self.base ** exponent)
 
-                    even_index = self._flat_index(
-                        batch,
-                        position,
-                        even_dimension,
-                        sequence_length,
-                    )
-                    odd_index = self._flat_index(
-                        batch,
-                        position,
-                        odd_dimension,
-                        sequence_length,
-                    )
+                        cosine = _rope_cos(angle)
+                        sine = _rope_sin(angle)
 
-                    even_value = source[even_index]
-                    odd_value = source[odd_index]
+                        even_index = self._flat_index(
+                            batch,
+                            position,
+                            even_dimension,
+                            sequence_length,
+                        )
+                        odd_index = self._flat_index(
+                            batch,
+                            position,
+                            odd_dimension,
+                            sequence_length,
+                        )
 
-                    output[even_index] = (
-                        even_value * cosine
-                        - odd_value * sine
-                    )
+                        even_value = source[even_index]
+                        odd_value = source[odd_index]
 
-                    output[odd_index] = (
-                        even_value * sine
-                        + odd_value * cosine
-                    )
+                        output[even_index] = (
+                            even_value * cosine
+                            - odd_value * sine
+                        )
 
-                    pair += 1
+                        output[odd_index] = (
+                            even_value * sine
+                            + odd_value * cosine
+                        )
 
-                position += 1
+                        pair += 1
 
-            batch += 1
+                    position += 1
+
+                batch += 1
 
         out = Value(
             Tensor(output, [dimension for dimension in x.shape]),
@@ -142,6 +162,24 @@ class RotaryEmbedding:
                 return
 
             upstream = out.grad.flatten()
+            if (
+                "GPU_BACKEND" in globals()
+                and GPU_BACKEND is not None
+                and GPU_BACKEND.enabled()
+            ):
+                gradient = GPU_BACKEND.rope_backward(
+                    upstream,
+                    batch_size,
+                    sequence_length,
+                    self.head_dim,
+                    position_offset,
+                    self.base,
+                )
+                x._accumulate(
+                    Tensor(gradient, [dimension for dimension in x.shape])
+                )
+                return
+
             gradient = [0.0] * len(source)
 
             batch_index = 0

@@ -148,6 +148,8 @@ def _load_sirellm_stack() -> None:
             tokenizer=DEFAULT_TOKENIZER,
             checkpoint=DEFAULT_CHECKPOINT,
             retrieval=DEFAULT_RETRIEVAL,
+            device=os.getenv("SIREIKON_DEVICE", "auto"),
+            cuda_device_index=int(os.getenv("SIREIKON_CUDA_DEVICE", "0")),
         )
 
         (
