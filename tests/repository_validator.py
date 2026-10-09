@@ -176,9 +176,8 @@ class RepositoryValidator:
         # These are existing application/runtime dependencies, not ML/compute
         # dependencies. The no-library ML constraint is enforced separately.
         allowed_runtime_roots = {
-            "fastapi",
-            "pydantic",
-            "uvicorn",
+            "django",
+            "gunicorn",
         }
 
         forbidden_ml_roots = {
@@ -318,7 +317,7 @@ class RepositoryValidator:
         api_ts = frontend / "src/lib/api.ts"
         components_dir = frontend / "src/components"
         public_dir = frontend / "public"
-        backend_app = self.root / "app.py"
+        backend_app = self.root / "ikon_django" / "urls.py"
 
         required_files = (
             index_html, package_json, vite_config, main_tsx, app_tsx,
@@ -393,8 +392,8 @@ class RepositoryValidator:
             ),
             "api_health_route": "/api/health" in api,
             "api_chat_route": "/api/chat/stream" in api,
-            "backend_health_route": "/api/health" in backend,
-            "backend_chat_route": "/api/chat/stream" in backend,
+            "backend_health_route": "api/health" in backend,
+            "backend_chat_route": "api/chat/stream" in backend,
             "vite_api_proxy": (
                 "'/api'" in vite
                 and "127.0.0.1:8000" in vite

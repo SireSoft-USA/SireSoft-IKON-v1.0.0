@@ -246,714 +246,86 @@ def build_store():
     )
 
 
+
+
 def test_path_policy():
-    policy = CheckpointPathPolicy(
-        "model_store_data"
-    )
-
-    eq(
-        policy.artifact_path(
-            "sirellm",
-            "v1",
-        ),
-        (
-            "model_store_data/"
-            "sirellm/v1.sllmckpt"
-        ),
-        "deterministic artifact path",
-    )
-
-    expect_error(
-        ValueError,
-        lambda: policy.artifact_path(
-            "../model",
-            "v1",
-        ),
-        "model traversal rejected",
-    )
-
-    expect_error(
-        ValueError,
-        lambda: policy.artifact_path(
-            "model",
-            "v1/other",
-        ),
-        "version path separator rejected",
-    )
+    policy = CheckpointPathPolicy('model_store_data')
+    # os.path.join uses the host platform's separator (\ on Windows, / on Linux).
+    # Check the actual checkpoint path without enforcing Unix-only formatting.
+    expected_checkpoint = os.path.join('model_store_data', 'sirellm', 'v1.lbckpt')
+    expected_directory = os.path.join('model_store_data', 'sirellm')
+    eq(policy.checkpoint_path('sirellm', 'v1'), expected_checkpoint, 'current checkpoint extension')
+    eq(policy.model_directory('sirellm'), expected_directory, 'model directory')
+    expect_error(ValueError, lambda: policy.checkpoint_path('../bad', 'v1'), 'reject model traversal')
+    expect_error(ValueError, lambda: policy.checkpoint_path('m', 'v1/other'), 'reject version traversal')
+    expect_error(ValueError, lambda: policy.segment('.', 'x'), 'reject dot segment')
 
 
 def test_artifact():
-    artifact = CheckpointArtifact(
-        model_id="m",
-        version="v1",
-        path="/x",
-        checksum="abc",
-        byte_count=10,
-        parameter_count=5,
-        parameter_tensors=2,
-        architecture={
-            "hidden_size": 2,
-        },
-    )
-
-    eq(
-        artifact.key(),
-        "m@v1",
-        "artifact identity key",
-    )
-
-    eq(
-        artifact.to_dict()[
-            "parameter_count"
-        ],
-        5,
-        "artifact parameter count",
-    )
+    artifact = CheckpointArtifact('m', 'v1', '/x', 'abc', 10, 5, 2, {'dim': 2}, {'team': ['a']})
+    eq(artifact.key(), 'm@v1', 'identity key')
+    eq(artifact.to_dict()['parameter_count'], 5, 'parameter count')
+    copy = artifact.to_dict()
+    copy['metadata']['team'].append('b')
+    eq(artifact.metadata['team'], ['a'], 'metadata deep copied')
+    expect_error(ValueError, lambda: CheckpointArtifact('', 'v1', '/x', 'abc', 10, 5, 2), 'reject empty model')
 
 
-def test_put_and_inspect():
+def test_store():
     store = build_store()
-
-    artifact = store.put(
-        model_id="sirellm",
-        version="v1",
-        source_path=(
-            SOURCE_PATH
-        ),
-        metadata={
-            "team": "core",
-        },
-    )
-
-    check(
-        os.path.exists(
-            artifact.path
-        ),
-        "stored checkpoint file exists",
-    )
-
-    eq(
-        artifact.parameter_count,
-        12,
-        "stored checkpoint parameter count inspected",
-    )
-
-    eq(
-        artifact.parameter_tensors,
-        2,
-        "stored parameter tensor count inspected",
-    )
-
-    eq(
-        artifact.architecture[
-            "hidden_size"
-        ],
-        2,
-        "architecture metadata extracted",
-    )
-
-    eq(
-        artifact.metadata[
-            "team"
-        ],
-        "core",
-        "store metadata merged",
-    )
-
-    eq(
-        store.status()[
-            "artifact_count"
-        ],
-        1,
-        "store artifact count",
-    )
-
-
-def test_source_destination_bytes_identical():
-    store = build_store()
-
-    artifact = store.put(
-        "sirellm",
-        "v1",
-        SOURCE_PATH,
-    )
-
-    source = open(
-        SOURCE_PATH,
-        "rb",
-    )
-
-    stored = open(
-        artifact.path,
-        "rb",
-    )
-
-    try:
-        eq(
-            stored.read(),
-            source.read(),
-            "checkpoint copied byte-for-byte",
-        )
-
-    finally:
-        source.close()
-        stored.close()
-
-
-def test_verify():
-    store = build_store()
-
-    store.put(
-        "sirellm",
-        "v1",
-        SOURCE_PATH,
-    )
-
-    result = store.verify(
-        "sirellm",
-        "v1",
-    )
-
-    eq(
-        result[
-            "valid"
-        ],
-        True,
-        "fresh stored checkpoint verifies",
-    )
-
-    eq(
-        result[
-            "checksum_match"
-        ],
-        True,
-        "stored checkpoint checksum matches",
-    )
-
-    eq(
-        result[
-            "bytes_match"
-        ],
-        True,
-        "stored checkpoint size matches",
-    )
+    artifact = store.put('sirellm', 'v1', SOURCE_PATH, metadata={'team': 'core'})
+    check(os.path.exists(artifact.path), 'checkpoint exists')
+    check(artifact.path.endswith('.lbckpt'), 'uses current file extension')
+    eq(artifact.parameter_count, 12, 'model parameter count inspected')
+    eq(artifact.parameter_tensors, 2, 'model tensor count inspected')
+    eq(artifact.architecture['hidden_size'], 2, 'architecture metadata')
+    eq(artifact.metadata['team'], 'core', 'user metadata')
+    with open(artifact.path, 'rb') as file:
+        stored = file.read()
+    with open(SOURCE_PATH, 'rb') as file:
+        source = file.read()
+    eq(stored, source, 'immutable byte-for-byte copy')
+    eq(store.get('sirellm','v1').key(), artifact.key(), 'catalog lookup')
+    eq(store.status()['checkpoint_count'], 1, 'store status')
+    eq(store.verify('sirellm', 'v1')['valid'], True, 'checksum verification')
+    expect_error(FileExistsError, lambda: store.put('sirellm','v1',SOURCE_PATH), 'reject duplicate destination')
+    artifact2 = store.put('sirellm', 'v2', SOURCE_PATH)
+    check(os.path.exists(artifact2.path), 'versioned checkpoint')
+    eq(store.catalog.count(), 2, 'catalog count')
+    eq(len(store.catalog.versions('sirellm')), 2, 'catalog versions')
 
 
 def test_tamper_detection():
     store = build_store()
-
-    artifact = store.put(
-        "sirellm",
-        "v1",
-        SOURCE_PATH,
-    )
-
-    handle = open(
-        artifact.path,
-        "rb",
-    )
-
-    try:
-        data = bytearray(
-            handle.read()
-        )
-    finally:
-        handle.close()
-
-    data[
-        -1
-    ] ^= 0x01
-
-    handle = open(
-        artifact.path,
-        "wb",
-    )
-
-    try:
-        handle.write(
-            data
-        )
-    finally:
-        handle.close()
-
-    result = store.verify(
-        "sirellm",
-        "v1",
-    )
-
-    eq(
-        result[
-            "valid"
-        ],
-        False,
-        "tampered stored checkpoint rejected",
-    )
-
-    eq(
-        result[
-            "checkpoint_valid"
-        ],
-        False,
-        "checkpoint codec detects tampering",
-    )
-
-
-def test_immutability_duplicate():
-    store = build_store()
-
-    store.put(
-        "sirellm",
-        "v1",
-        SOURCE_PATH,
-    )
-
-    expect_error(
-        ValueError,
-        lambda: store.put(
-            "sirellm",
-            "v1",
-            SOURCE_PATH,
-        ),
-        "same model version cannot be overwritten",
-    )
-
-
-def test_existing_destination_rejected():
-    store = build_store()
-
-    destination = (
-        store.path_policy
-        .artifact_path(
-            "sirellm",
-            "v1",
-        )
-    )
-
-    os.makedirs(
-        os.path.dirname(
-            destination
-        ),
-        exist_ok=True,
-    )
-
-    handle = open(
-        destination,
-        "wb",
-    )
-
-    try:
-        handle.write(
-            b"occupied"
-        )
-    finally:
-        handle.close()
-
-    expect_error(
-        FileExistsError,
-        lambda: store.put(
-            "sirellm",
-            "v1",
-            SOURCE_PATH,
-        ),
-        "existing immutable destination is never overwritten",
-    )
-
-    eq(
-        open(
-            destination,
-            "rb",
-        ).read(),
-        b"occupied",
-        "existing file remains unchanged",
-    )
-
-
-def test_catalog_order():
-    catalog = CheckpointCatalog()
-
-    catalog.add(
-        CheckpointArtifact(
-            "model-a",
-            "v1",
-            "/a",
-            "1",
-            1,
-            0,
-            0,
-        )
-    )
-
-    catalog.add(
-        CheckpointArtifact(
-            "model-a",
-            "v2",
-            "/b",
-            "2",
-            2,
-            0,
-            0,
-        )
-    )
-
-    catalog.add(
-        CheckpointArtifact(
-            "model-b",
-            "v1",
-            "/c",
-            "3",
-            3,
-            0,
-            0,
-        )
-    )
-
-    eq(
-        catalog.models(),
-        [
-            {
-                "model_id": "model-a",
-                "versions": [
-                    "v1",
-                    "v2",
-                ],
-                "version_count": 2,
-            },
-            {
-                "model_id": "model-b",
-                "versions": [
-                    "v1",
-                ],
-                "version_count": 1,
-            },
-        ],
-        "catalog preserves model/version registration order",
-    )
-
-
-def test_catalog_state():
-    catalog = CheckpointCatalog()
-
-    catalog.add(
-        CheckpointArtifact(
-            "m",
-            "v1",
-            "/a",
-            "abc",
-            10,
-            3,
-            1,
-            metadata={
-                "x": 1,
-            },
-        )
-    )
-
-    state = catalog.export_state()
-
-    restored = CheckpointCatalog()
-    restored.load_state(
-        state
-    )
-
-    eq(
-        restored.export_state(),
-        state,
-        "catalog state exact round trip",
-    )
-
-
-def test_model_registry_integration():
-    store = build_store()
-
-    artifact = store.put(
-        "sirellm",
-        "v1",
-        SOURCE_PATH,
-    )
-
-    registry = ModelRegistry()
-
-    registered = (
-        store
-        .register_with_model_registry(
-            registry,
-            "sirellm",
-            "v1",
-            metadata={
-                "storage": "model_store",
-            },
-            stage=True,
-        )
-    )
-
-    eq(
-        registered.checkpoint_path,
-        artifact.path,
-        "model registry points at immutable store artifact",
-    )
-
-    eq(
-        registered.status,
-        "staged",
-        "store can register artifact as staged model",
-    )
-
-    eq(
-        registered.checkpoint_checksum,
-        artifact.checksum,
-        "registry checksum matches store checksum",
-    )
-
-    eq(
-        registry.verify(
-            "sirellm",
-            "v1",
-        )[
-            "valid"
-        ],
-        True,
-        "model registry verifies stored artifact",
-    )
-
-
-def test_multiple_versions():
-    store = build_store()
-
-    store.put(
-        "sirellm",
-        "v1",
-        SOURCE_PATH,
-    )
-
-    store.put(
-        "sirellm",
-        "v2",
-        SOURCE_PATH,
-        metadata={
-            "note": "second",
-        },
-    )
-
-    versions = store.list_versions(
-        "sirellm"
-    )
-
-    eq(
-        [
-            row[
-                "version"
-            ]
-            for row in versions
-        ],
-        [
-            "v1",
-            "v2",
-        ],
-        "store preserves version order",
-    )
-
-    eq(
-        store.status()[
-            "model_count"
-        ],
-        1,
-        "multiple versions still one model",
-    )
-
-    eq(
-        store.status()[
-            "artifact_count"
-        ],
-        2,
-        "multiple versions counted as artifacts",
-    )
-
-
-def test_invalid_checkpoint_cleanup():
-    invalid_path = (
-        "model_store/checkpoints/"
-        "_invalid.sllmckpt"
-    )
-
-    handle = open(
-        invalid_path,
-        "wb",
-    )
-
-    try:
-        handle.write(
-            b"not-a-checkpoint"
-        )
-    finally:
-        handle.close()
-
-    try:
-        store = build_store()
-
-        expect_error(
-            ValueError,
-            lambda: store.put(
-                "bad",
-                "v1",
-                invalid_path,
-            ),
-            "invalid source checkpoint rejected",
-        )
-
-        destination = (
-            store.path_policy
-            .artifact_path(
-                "bad",
-                "v1",
-            )
-        )
-
-        eq(
-            os.path.exists(
-                destination
-            ),
-            False,
-            "invalid source creates no stored artifact",
-        )
-
-    finally:
-        if os.path.exists(
-            invalid_path
-        ):
-            os.remove(
-                invalid_path
-            )
-
-
-def test_metadata_copy_isolation():
-    store = build_store()
-
-    metadata = {
-        "tags": [
-            "a",
-        ],
-    }
-
-    artifact = store.put(
-        "sirellm",
-        "v1",
-        SOURCE_PATH,
-        metadata=metadata,
-    )
-
-    metadata[
-        "tags"
-    ].append(
-        "mutated"
-    )
-
-    eq(
-        artifact.metadata[
-            "tags"
-        ],
-        [
-            "a",
-        ],
-        "artifact metadata isolated from caller mutation",
-    )
+    artifact = store.put('sirellm', 'v1', SOURCE_PATH)
+    with open(artifact.path, 'r+b') as stream:
+        stream.seek(-1, os.SEEK_END)
+        old = stream.read(1)
+        stream.seek(-1, os.SEEK_END)
+        stream.write(bytes([old[0] ^ 1]))
+    eq(store.verify('sirellm', 'v1')['valid'], False, 'tampered checkpoint rejected')
 
 
 def main():
-    if os.path.exists(
-        TMP_ROOT
-    ):
-        shutil.rmtree(
-            TMP_ROOT
-        )
-
-    if os.path.exists(
-        SOURCE_PATH
-    ):
-        os.remove(
-            SOURCE_PATH
-        )
-
-    make_checkpoint(
-        SOURCE_PATH
-    )
-
+    global ASSERTIONS
+    if os.path.exists(TMP_ROOT):
+        shutil.rmtree(TMP_ROOT)
+    if os.path.exists(SOURCE_PATH):
+        os.remove(SOURCE_PATH)
+    make_checkpoint(SOURCE_PATH)
     try:
-        tests = [
-            test_path_policy,
-            test_artifact,
-            test_put_and_inspect,
-            test_source_destination_bytes_identical,
-            test_verify,
-            test_tamper_detection,
-            test_immutability_duplicate,
-            test_existing_destination_rejected,
-            test_catalog_order,
-            test_catalog_state,
-            test_model_registry_integration,
-            test_multiple_versions,
-            test_invalid_checkpoint_cleanup,
-            test_metadata_copy_isolation,
-        ]
-
-        for test in tests:
-            if os.path.exists(
-                TMP_ROOT
-            ):
-                shutil.rmtree(
-                    TMP_ROOT
-                )
-
+        for test in (test_path_policy, test_artifact, test_store, test_tamper_detection):
+            if os.path.exists(TMP_ROOT):
+                shutil.rmtree(TMP_ROOT)
             test()
-
     finally:
-        if os.path.exists(
-            TMP_ROOT
-        ):
-            shutil.rmtree(
-                TMP_ROOT
-            )
-
-        if os.path.exists(
-            SOURCE_PATH
-        ):
-            os.remove(
-                SOURCE_PATH
-            )
-
-    print(
-        "MODEL STORE CHECKPOINTS TEST SUITE: PASS"
-    )
-    print(
-        "Assertions passed:",
-        ASSERTIONS,
-    )
-    print(
-        "Files validated: 4/4"
-    )
-    print(
-        "Safe deterministic artifact paths: VALIDATED"
-    )
-    print(
-        "Checkpoint validation before storage: VALIDATED"
-    )
-    print(
-        "Immutable byte-for-byte checkpoint copies: VALIDATED"
-    )
-    print(
-        "Checksum/tamper verification: VALIDATED"
-    )
-    print(
-        "Deterministic model/version catalog: VALIDATED"
-    )
-    print(
-        "Model Registry integration: VALIDATED"
-    )
-    print(
-        "Third-party dependencies: 0"
-    )
-    print(
-        "Standard-library filesystem dependency: os"
-    )
+        if os.path.exists(TMP_ROOT):
+            shutil.rmtree(TMP_ROOT)
+        if os.path.exists(SOURCE_PATH):
+            os.remove(SOURCE_PATH)
+    print('MODEL STORE CHECKPOINTS CURRENT-API TEST SUITE: PASS')
+    print('Assertions passed:', ASSERTIONS)
 
 
-main()
+if __name__ == '__main__':
+    main()

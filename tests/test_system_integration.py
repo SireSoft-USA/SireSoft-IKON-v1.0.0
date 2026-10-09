@@ -336,7 +336,7 @@ def main():
         "Gateway /v1/health + /v1/chat contract: VALIDATED"
     )
     print(
-        "Frontend React/Vite + FastAPI contract: VALIDATED"
+        "Frontend React/Vite + Django contract: VALIDATED"
     )
     print(
         "Cross-layer smoke tests passed:",
@@ -352,7 +352,7 @@ def main():
         "Forbidden ML/numerical dependencies: 0"
     )
     print(
-        "Allowed app runtime dependencies: fastapi, pydantic, uvicorn"
+        "Allowed app runtime dependencies: django, gunicorn"
     )
 
 

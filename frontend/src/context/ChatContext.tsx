@@ -143,6 +143,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         ),
       )
     } catch (error) {
+      console.error('SireSoft-IKON chat request failed:', error)
       const aborted = error instanceof DOMException && error.name === 'AbortError'
       setConversations((prev) =>
         prev.map((c) =>

@@ -6,6 +6,7 @@ mirrors how these tests were originally authored.
 """
 
 import argparse
+import os
 import subprocess
 import sys
 import time
@@ -15,6 +16,9 @@ from real_runtime import ROOT, enter_project_root
 
 
 QUICK_TESTS = (
+    "tests/test_django_contract.py",
+    "tests/test_django_http.py",
+    "tests/test_frontend_api.py",
     "tests/test_gpu_backend_contract.py",
     "tools/test_compute_backend.py",
     "tools/test_gpu_training.py",
@@ -38,12 +42,15 @@ def discover_tests():
     return sorted(result)
 
 
-def run_one(relative, timeout):
+def run_one(relative, timeout, require_django=False):
     command = [sys.executable, str(ROOT / relative)]
     if relative == "tools/test_gpu_training.py":
         # The portable suite never builds native CUDA code. Hardware/backend
         # absence is a valid SKIP; strict CUDA is validated on the GPU server.
         command.extend(["--arch", "sm_61"])
+    env = os.environ.copy()
+    if require_django:
+        env["SIREIKON_REQUIRE_DJANGO_TESTS"] = "1"
     started = time.time()
     try:
         completed = subprocess.run(
@@ -52,6 +59,7 @@ def run_one(relative, timeout):
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=env,
         )
         output = ((completed.stdout or "") + (completed.stderr or "")).strip()
         return completed.returncode, output, time.time() - started
@@ -67,7 +75,17 @@ def main():
     parser.add_argument("--show-pass-output", action="store_true")
     parser.add_argument("--start", type=int, default=1, help="1-based first discovered test to run.")
     parser.add_argument("--count", type=int, default=0, help="Maximum number of tests to run; 0 means all remaining.")
+    parser.add_argument(
+        "--require-django", action="store_true",
+        help="Fail if Django is not installed (recommended before deployment).",
+    )
     args = parser.parse_args()
+    if args.require_django:
+        try:
+            import django
+        except ImportError:
+            print("ERROR: Django is missing; run: python -m pip install -r requirements.txt")
+            return 2
 
     enter_project_root()
     tests = list(QUICK_TESTS if args.quick else discover_tests())
@@ -84,7 +102,7 @@ def main():
     print()
 
     for index, relative in enumerate(tests, start=1):
-        code, output, elapsed = run_one(relative, args.timeout)
+        code, output, elapsed = run_one(relative, args.timeout, args.require_django)
         status = "PASS" if code == 0 else "FAIL"
         print(f"[{index:03d}/{len(tests):03d}] {status} {relative} ({elapsed:.2f}s)")
         if code == 0:

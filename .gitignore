@@ -204,3 +204,7 @@ libs/core/gpu/*.dylib
 
 # Live per-batch training metrics
 model_store/checkpoints/*-training.jsonl
+
+# Django application data and static collection
+ikon.sqlite3
+staticfiles/

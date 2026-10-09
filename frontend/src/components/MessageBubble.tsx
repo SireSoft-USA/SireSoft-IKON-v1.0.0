@@ -30,7 +30,7 @@ export function MessageBubble({ message }: { message: ChatMessage }) {
             <button className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/[0.07] dark:hover:text-slate-200" title="Regenerate"><RotateCcw size={15} /></button>
           </div>
         )}
-        {message.error && <div className="mt-2 text-xs text-red-500">Response generation failed. Check the FastAPI backend.</div>}
+        {message.error && <div className="mt-2 text-xs text-red-500">Response generation failed. Check the Django backend.</div>}
       </div>
     </div>
   )

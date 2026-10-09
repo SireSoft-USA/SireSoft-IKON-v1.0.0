@@ -1,0 +1,5 @@
+# SireSoft-IKON v1.0.0 — HTTP server dependencies.
+# Custom LLM, RAG, tokenizer, training, and CUDA modules remain standard-library based.
+Django>=5.2,<6.0
+# Gunicorn runs on Linux / production only; use Django runserver on Windows.
+gunicorn>=22,<24; platform_system != "Windows"
