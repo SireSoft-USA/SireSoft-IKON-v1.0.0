@@ -58,6 +58,7 @@ def frontend_health(request):
     return JsonResponse({
         "status": "ok", "backend": "online", "model_ready": ready,
         "model_loading": loading, "model_error": error,
+        "compute": core.compute_status(),
     })
 
 
@@ -102,6 +103,7 @@ def health(request):
         "model": inference.status() if ready and inference is not None else None,
         "retrieval": retrieval.status() if ready and retrieval is not None else None,
         "error": error, "artifacts": core._artifact_paths(),
+        "compute": core.compute_status(),
     })
 
 
@@ -109,8 +111,11 @@ def health(request):
 def chat(request, payload):
     stack = core._require_stack()
     eos, pad = core._special_token_ids(stack["tokenizer_manager"])
+    model = getattr(getattr(stack["inference"], "loaded", None), "model", None)
+    window = getattr(model, "max_seq_len", 512)
+    budget = min(payload.max_new_tokens, max(1, window // 8)) if window <= 128 else min(payload.max_new_tokens, max(1, window // 4))
     result = stack["orchestrator"].answer(
-        query_text=payload.query, max_new_tokens=payload.max_new_tokens,
+        query_text=payload.query, max_new_tokens=budget,
         candidate_k=payload.candidate_k, top_k=payload.top_k,
         use_mmr=payload.use_mmr, mmr_lambda=payload.mmr_lambda,
         similarity_weight=payload.similarity_weight, eos_token_ids=[eos],

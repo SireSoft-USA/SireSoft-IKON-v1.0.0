@@ -38,6 +38,7 @@ def main():
             assert res.status_code == 200, (res.status_code, res.content[:200])
             assert res.json()['backend'] == 'online'
             assert 'model_ready' in res.json()
+            assert 'compute' in res.json()
             assert client.get('/v1/health').status_code == 200
 
         # Django routing / method, JSON and validation parity.

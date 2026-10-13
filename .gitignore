@@ -208,3 +208,9 @@ model_store/checkpoints/*-training.jsonl
 # Django application data and static collection
 ikon.sqlite3
 staticfiles/
+
+# Generated model bundle manifests (recreated after verified training)
+model_store/manifests/ikon-*-bundle.json
+
+# TypeScript build cache
+*.tsbuildinfo

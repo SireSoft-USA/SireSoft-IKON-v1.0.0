@@ -20,6 +20,9 @@ def main():
     check("TextDecoder" in api, "Streaming response decoder missing")
     check("api/health" in backend, "Django health route missing")
     check("api/chat/stream" in backend, "Django streaming route missing")
+    vite = (ROOT / "frontend" / "vite.config.ts").read_text(encoding="utf-8")
+    check("SIREIKON_API_PORT" in vite, "Unified API port proxy is missing")
+    check("'/api'" in vite and "'/v1'" in vite, "API and model routes must use the single frontend origin")
 
     print("FRONTEND API CONTRACT TEST: PASS")
 

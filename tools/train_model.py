@@ -781,6 +781,30 @@ def main():
             resume_targets = 0
             resume_batches_completed = 0
 
+    # Epoch/step files are full checkpoint snapshots, not parameter shards.
+    # A completed auto-resume may have a valid progress checkpoint but a
+    # missing final serving artifact (for example, an interrupted final copy).
+    # Re-publish the loaded full model before marking the job complete.
+    if not output_path.is_file():
+        if resume_path is None or job.trainer.state.epoch < args.epochs:
+            raise RuntimeError(
+                "Training finished without a complete serving checkpoint: "
+                + str(output_path)
+            )
+        manager.save_checkpoint(
+            job_id,
+            str(output_path),
+            metadata={
+                **common_metadata(
+                    args, tokenizer_path, train_sequences,
+                    validation_sequences, compute_status,
+                ),
+                "checkpoint_kind": "final_recovered_from_resume",
+                "completed_epochs": job.trainer.state.epoch,
+            },
+        )
+        print("[RECOVERED] Final serving checkpoint:", output_path)
+
     manager.complete(job_id)
 
     final_compute_status = (

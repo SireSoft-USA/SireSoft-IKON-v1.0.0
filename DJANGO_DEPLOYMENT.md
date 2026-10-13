@@ -85,3 +85,67 @@ Django HTTP integration tests require Django; install requirements.txt before ex
 ```bash
 python tools/test_gpu_training.py --arch sm_61 --require-cuda
 ```
+
+## Unified single-command GPU demo / end-to-end test (new)
+
+The recommended supervised Nginx/Gunicorn deployment above is unchanged. For
+**testing the complete React + Django + checkpoint + RAG application** without
+reconfiguring the existing website, start the new unified demo launcher from
+the repository root. It starts **one Gunicorn worker** (on Linux), uses Vite's
+same-origin `/api` reverse proxy, loads and verifies the **existing** trained
+artifacts, and prints **only the frontend URL**. Ctrl+C stops both services.
+
+```bash
+cd ~/independant_chatbot
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+# When NVIDIA driver and matching sm_61 .so are operational:
+python app.py --gpu --require-model --api-port 8010 \
+    --web-host 0.0.0.0 --public-host 10.0.2.22
+```
+
+Frontend (over SireSoft VPN): **`http://10.0.2.22:5173`**. If port 5173 is
+blocked or you don't want to expose a dev server, omit `--web-host` and use
+an SSH tunnel from Windows:
+
+```powershell
+ssh -N -L 5174:127.0.0.1:5173 siresoft@10.0.2.22
+```
+
+Then open **`http://localhost:5174`** on Windows. The frontend is the only
+browser entry point. Do not start another Gunicorn instance on the same port.
+
+### Important GPU guarantee and limitations
+
+- `--gpu` is *strict*: the application will not silently use CPU when CUDA is
+  requested. It validates NVIDIA driver visibility, matching `sm_61` CUDA
+  metadata/source and `.so`, and checks the model's active backend after load.
+- **A working NVIDIA driver is required.** A failing `nvidia-smi` is a host
+  issue, not something the launcher can repair. Do not reinstall drivers or
+  reboot the shared company server without approval.
+- This small checkpoint has `max_seq_len=64`, so responses and RAG excerpts
+  are short and its quality may be poor. Compact RAG admits only a small,
+  cited, safety-screened excerpt. Longer context requires training a new,
+  compatible model rather than changing the checkpoint header.
+- GPU utilization is constrained by the existing **58K-parameter model**,
+  kernels and sequence length. The launcher does not claim to saturate the
+  Quadro P5000 and does not intentionally consume all GPU memory.
+- The project source ZIP omits trained `.lbckpt`, `.sltok`, `.slretr` files
+  and the compiled Linux `.so`. **Preserve those files on the server when
+  updating code**; do not retrain unless you explicitly change the model.
+
+### Automated checks
+
+```bash
+# On laptop / server; no trained artifacts needed for offline tests:
+python tools/run_tests.py --quick --require-django
+python tools/run_tests.py --require-django
+
+# Run while python app.py is running on the actual model server:
+python tools/test_live_app.py --web-url http://127.0.0.1:5173 --require-gpu
+```
+
+The live test verifies the React page, Django model readiness, real general
+chat and RAG chat through the **same frontend port**, and CUDA kernel-call
+counts when `--require-gpu` is specified. Run it without `--require-gpu` for
+local CPU smoke tests. The tests cannot emulate production GPU hardware.

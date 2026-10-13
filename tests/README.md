@@ -45,3 +45,30 @@ prevents false negatives for:
 
 The validator also avoids the regular-expression pattern that caused the
 Python 3.10 `unterminated subpattern` error.
+
+## Unified app regression and live end-to-end tests
+
+The test runner now includes `tests/test_unified_app.py` (launcher and strict
+CUDA fail-fast), `tests/test_compact_rag.py` (real short-window retrieval and
+citation budgeting), and the existing Django/frontend tests. Both new unit
+suites run without a trained checkpoint, driver or internet connection.
+
+```bash
+python -m pip install -r requirements.txt
+python tools/run_tests.py --quick --require-django
+python tools/run_tests.py --require-django
+```
+
+`tools/test_live_app.py` is **intentionally excluded from the automated
+source suite**: it requires the real running application, trained artifacts
+and real HTTP requests. After starting `python app.py`, test both real chat
+modes through the frontend proxy:
+
+```bash
+python tools/test_live_app.py --web-url http://127.0.0.1:5173
+# On the Quadro P5000 when nvidia-smi and the driver are working:
+python tools/test_live_app.py --web-url http://127.0.0.1:5173 --require-gpu
+```
+
+The strict GPU live test fails if CUDA was not actually selected or no CUDA
+kernels were recorded. It does not claim generated text is semantically good.

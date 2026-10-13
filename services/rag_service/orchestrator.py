@@ -11,7 +11,9 @@ class RAGServiceOrchestrator:
       -> output guard
       -> citations + redacted safety metadata
 
-    Retrieved chunks are never truncated mid-evidence to fit the model prompt.
+    Normal-sized models preserve entire source chunks. Models with a tiny
+    context window (up to 128 tokens) may use one short, cited source excerpt,
+    explicitly bounded to fit the checkpoint's native sequence length.
     """
 
     def __init__(
@@ -179,6 +181,15 @@ class RAGServiceOrchestrator:
                 raise ValueError(
                     "max_prompt_tokens must be positive int or None"
                 )
+
+        # The current deployment checkpoint has a 64-token context window.
+        # Use a cited excerpt for such tiny models rather than rejecting every
+        # RAG request because the normal source chunks cannot fit. The normal
+        # whole-chunk policy is untouched for models with larger windows.
+        if max_prompt_tokens is not None and max_prompt_tokens <= 128:
+            return self._prepare_small_window(
+                query_text, retrieval, input_decision, max_prompt_tokens
+            )
 
         active_results = list(
             retrieval.ranked_results
@@ -355,6 +366,98 @@ class RAGServiceOrchestrator:
             safety_view=(
                 self.safety_view
             ),
+        )
+
+    def _prepare_small_window(
+        self, query_text, retrieval, input_decision, max_prompt_tokens
+    ):
+        """Fit one clearly cited, safety-checked excerpt into a tiny checkpoint.
+
+        The excerpt is visibly truncated reference DATA, not a complete chunk.
+        Its citation preserves the original document/provenance. Unlike normal
+        RAG, a 64-token model cannot take substantial context or conversations.
+        """
+        results = list(retrieval.ranked_results)
+        citations = CitationBuilder().build(results[:1]) if results else []
+        source_text = citations[0].text if citations else ""
+        context_decision = self.safety_engine.check_context(
+            source_text,
+            metadata={"operation": "rag_prepare", "source_count": len(citations)},
+        )
+        if not context_decision.allowed():
+            return RAGPreparation(
+                query_text=query_text, status="blocked", blocked_phase="context",
+                retrieval=retrieval, context=None, prompt="", prompt_ids=[],
+                input_decision=input_decision, context_decision=context_decision,
+                safety_view=self.safety_view,
+            )
+        safe_text = context_decision.safe_text or ""
+        # Prefer sentence-level reference text over control tags in a
+        # dialogue-formatted indexed record. Never execute text as instructions.
+        parts = [line.strip() for line in safe_text.splitlines() if line.strip()]
+        content_lines = [line for line in parts if not line.startswith("<")]
+        if content_lines:
+            query_terms = {
+                word.lower().strip("?.,!:;") for word in query_text.split()
+                if len(word) > 3
+            }
+            source = max(
+                content_lines,
+                key=lambda line: (
+                    sum(word in line.lower() for word in query_terms),
+                    len(line) if len(line) < 160 else 0,
+                ),
+            )
+        else:
+            source = safe_text.strip()
+
+        def prompt_for(excerpt):
+            if excerpt:
+                return "[S1] " + excerpt + "\nQ: " + query_text + "\nA:"
+            return "Q: " + query_text + "\nA:"
+
+        # If even the user question cannot fit, return a precise error.
+        if len(self.tokenizer.encode(prompt_for(""))) >= max_prompt_tokens:
+            raise ValueError(
+                "Question exceeds this checkpoint's context capacity; "
+                "use a shorter query or train a model with a longer sequence length"
+            )
+        if not source:
+            raise ValueError("No safe retrieved evidence is available for RAG")
+        # Fit a character-aligned excerpt, not arbitrary token fragments. A
+        # citation is attached only when evidence is actually in the prompt.
+        left, right = 0, len(source)
+        while left < right:
+            mid = (left + right + 1) // 2
+            if len(self.tokenizer.encode(prompt_for(source[:mid]))) <= max_prompt_tokens:
+                left = mid
+            else:
+                right = mid - 1
+        if left < 4:
+            raise ValueError(
+                "RAG evidence cannot fit this 64-token checkpoint; "
+                "reduce output tokens or train a longer-context model"
+            )
+        excerpt = source[:left]
+        prompt = prompt_for(excerpt)
+        prompt_ids = self.tokenizer.encode(prompt)
+        context_text = "[S1] " + excerpt
+        context = ContextPackage(
+            text=context_text, citations=citations[:1],
+            token_count=len(self.tokenizer.encode(context_text)),
+            skipped_item_ids=[r.entry.item_id for r in results[1:]],
+        )
+        chosen = RetrievalBundle(
+            query_text=retrieval.query_text,
+            query_embedding=retrieval.query_embedding,
+            raw_results=retrieval.raw_results,
+            ranked_results=results[:1],
+        )
+        return RAGPreparation(
+            query_text=query_text, status="ready", blocked_phase=None,
+            retrieval=chosen, context=context, prompt=prompt, prompt_ids=prompt_ids,
+            input_decision=input_decision, context_decision=context_decision,
+            safety_view=self.safety_view,
         )
 
     def answer(

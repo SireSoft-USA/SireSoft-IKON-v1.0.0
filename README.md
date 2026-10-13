@@ -196,6 +196,60 @@ curl http://127.0.0.1:8000/api/health
 
 A healthy HTTP response does **not** necessarily mean the trained model is loaded: check `model_ready` and `model_error` before testing real chat replies.
 
+## One-command full application (React + Django + IKON model)
+
+`app.py` now manages **both** services, keeping Django on a private local
+listener and proxying `/api` through Vite. It loads the existing trained
+checkpoint and retrieval index; it **never runs training**. On Linux it runs
+one Gunicorn worker to avoid duplicate GPU/model allocations, and it shuts
+down both processes on Ctrl+C or a disconnected SSH session.
+
+```powershell
+# Windows laptop (CPU fallback when no Linux CUDA is available)
+python -m pip install -r requirements.txt
+python app.py --device auto
+```
+
+```bash
+# SireSoft Linux GPU server (only after the NVIDIA driver is healthy)
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python app.py --gpu --require-model --api-port 8010 \
+  --web-host 0.0.0.0 --public-host 10.0.2.22
+```
+
+**Open the single printed frontend link** (over the company VPN). For the
+loopback-only secure default, use `ssh -N -L 5174:127.0.0.1:5173
+siresoft@10.0.2.22` from Windows and browse `http://localhost:5174`.
+General chat / RAG can be switched in the **Settings** panel. The launcher
+waits for trained model readiness before printing the frontend link when the
+artifacts exist.
+
+- `--gpu` is strict: **no silent CPU fallback**. A failing `nvidia-smi`
+  indicates a driver/host issue; the launcher cannot repair the OS driver.
+- On a machine without a GPU, `--device auto` selects CPU with an explicit
+  warning. `--check` reports artifact/GPU availability without launching.
+- The current server checkpoint has a **64-token context window and ~58K
+  parameters**. Short cited reference excerpts permit smoke-testing RAG, but
+  responses will be short and may be incoherent; longer-context grounded
+  answers require a more capable trained checkpoint.
+- **Do not overwrite** production `.lbckpt`, `.sltok`, `.slretr`, or the Linux
+  `libsireikon_cuda.so` when transferring this source archive.
+
+### Verify a running app end to end
+
+```bash
+python tools/run_tests.py --quick --require-django
+python tools/run_tests.py --require-django
+# In a second terminal while app.py is running:
+python tools/test_live_app.py --web-url http://127.0.0.1:5173 --require-gpu
+```
+
+`tools/test_live_app.py` exercises the real UI HTTP response, Django readiness,
+general chat, RAG chat, and CUDA activity through the frontend API proxy. It
+must run on the GPU server for a strict CUDA PASS; ordinary source tests can
+run on Windows or Linux without the trained artifacts.
+
 ## HTTP API
 
 | Method | Route | Purpose |
@@ -227,6 +281,22 @@ python run_pipeline.py
 For development on a machine without NVIDIA hardware, run `python run_pipeline.py --device cpu` **only when the necessary local datasets are available**.
 
 The server-side CUDA library and `libsireikon_cuda.build.json` must match the source; `nvcc` is needed for compilation only, not for loading a compatible prebuilt backend. See [GPU_RUN.md](GPU_RUN.md) and [REAL_RUN.md](REAL_RUN.md).
+
+
+### One-command training and finalized model bundle
+
+`python run_pipeline.py --profile p5000-512 --device cuda` runs the full
+preprocessing, tokenizer, LLM training and SireSoft RAG-index pipeline. On
+success, it verifies the trained weights/tokenizer/index **together** using the
+real runtime and writes `model_store/manifests/ikon-p5000-512-bundle.json`
+with SHA-256 checksums and paths. The serving model is one **complete**
+`*.lbckpt` file; step and epoch checkpoints are whole-model recovery snapshots,
+**not shards that require merging**. Original legacy artifacts are preserved.
+
+`--start-app` optionally launches the React + Django frontend after the
+verified model is ready. For the other training profiles and details, see
+[MODEL_TRAINING.md](MODEL_TRAINING.md). Strict CUDA still requires a working
+NVIDIA driver and a matching precompiled backend.
 
 ## Testing
 
@@ -269,3 +339,45 @@ This repository is intended for SireSoft and authorized collaborators. No permis
 <sub>Engineered for SireSoft · SireSoft-IKON v1.0.0</sub>
 
 </div>
+
+
+## Larger-context training: Quadro P5000
+
+The original checkpoint is a **58,240-parameter / 64-token** model. It is a valid
+smoke-test artifact, **not** a capable general assistant. Changing the serving
+limit cannot enlarge trained weights or guarantee coherent answers. This project
+provides opt-in, isolated training profiles:
+
+| Profile | Context | Width | Layers / heads | Vocabulary | Status |
+|---|---:|---:|---:|---:|---|
+| `legacy` | 64 | 32 | 2 / 4 | 512 | Existing checkpoint |
+| `p5000-512` | 512 | 128 | 4 / 4 | 4096 | Train and benchmark |
+| `p5000-1024` | 1024 | 192 | 4 / 6 | 4096 | Experimental; benchmark before full training |
+
+Both P5000 profiles are **custom from-scratch models**, not pretrained models.
+They require substantial, quality-controlled training data, hardware testing and
+real conversational evaluations before they can answer broad questions reliably.
+The Quadro P5000's nominal 16 GB VRAM does not guarantee these Python/CUDA
+configurations fit at acceptable speed. Driver health (`nvidia-smi`) and smoke
+tests must succeed first. Existing artifacts are never overwritten by profiles.
+
+```bash
+# Inspect resolved paths/parameters without training or touching the GPU:
+python tools/run_pipeline.py --profile p5000-512 --dry-run
+
+# Only after the CUDA driver is healthy and data are present:
+python tools/run_pipeline.py --profile p5000-512 --device cuda --skip-preprocessing --fresh
+
+# Activate the newly generated checkpoint, tokenizer and matching RAG index:
+python app.py --model-profile p5000-512 --gpu --require-model \
+  --api-port 8010 --web-host 0.0.0.0 --public-host 10.0.2.22
+
+# Verify both general chat and RAG through the frontend proxy:
+python tools/test_live_app.py --web-url http://127.0.0.1:5173 --require-gpu
+```
+
+Set `--records-per-dataset 0` (all available canonical records) only after
+benchmarking a small run; full-dataset training may take substantial time.
+For a different tokenizer you **must** rebuild the retrieval index with it;
+profiles do this automatically. Do not rename old checkpoints to a new profile.
+Read [MODEL_TRAINING.md](MODEL_TRAINING.md) for a safe rollout guide.

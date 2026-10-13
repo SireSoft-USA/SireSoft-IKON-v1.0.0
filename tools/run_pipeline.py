@@ -16,6 +16,7 @@ from pathlib import Path
 
 from real_runtime import ROOT, enter_project_root
 from cuda_status import CUDA_LIBRARY, backend_is_current, load_build_metadata, nvidia_smi_info
+from model_profiles import PROFILES, get_profile
 
 
 TINYSTORIES_PARTS_DIR = ROOT / "datasets" / "canonical" / "tinystories_parts"
@@ -212,12 +213,10 @@ def verify_canonical_datasets():
         )
 
 
-def verify_artifacts():
-    expected = (
-        ROOT / "model_store" / "manifests" / "sirellm_tokenizer.sltok",
-        ROOT / "model_store" / "checkpoints" / "sirellm-v1.lbckpt",
-        ROOT / "vector_store" / "indexes" / "siresoft.slretr",
-    )
+def verify_artifacts(profile):
+    expected = tuple(ROOT / path for path in (
+        profile.tokenizer, profile.checkpoint, profile.retrieval,
+    ))
 
     banner("STEP: Final artifact verification")
     missing = []
@@ -240,11 +239,15 @@ def main():
         )
     )
 
-    parser.add_argument("--records-per-dataset", type=int, default=250)
-    parser.add_argument("--tokenizer-records-per-dataset", type=int, default=2000)
-    parser.add_argument("--epochs", type=int, default=1)
-    parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--sequence-length", type=int, default=64)
+    parser.add_argument("--profile", choices=tuple(PROFILES), default="p5000-512",
+                        help="Training architecture and isolated artifact paths (defaults to new 512-token P5000 model; legacy is opt-in).")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="Show resolved profile and output paths without loading data, GPU or training.")
+    parser.add_argument("--records-per-dataset", type=int, default=None)
+    parser.add_argument("--tokenizer-records-per-dataset", type=int, default=None)
+    parser.add_argument("--epochs", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--sequence-length", type=int, default=None)
 
     parser.add_argument(
         "--device",
@@ -303,6 +306,24 @@ def main():
     )
 
     args = parser.parse_args()
+    profile = get_profile(args.profile)
+    for key in ("records_per_dataset", "tokenizer_records_per_dataset",
+                "epochs", "batch_size", "sequence_length"):
+        if getattr(args, key) is None:
+            setattr(args, key, getattr(profile, key))
+    if args.sequence_length < 2 or args.batch_size < 1 or args.epochs < 1:
+        parser.error("sequence length, batch size and epochs must be positive")
+    if args.dry_run:
+        print("IKON TRAINING PROFILE:", profile.name)
+        for key in ("sequence_length", "d_model", "layers", "heads", "d_ff",
+                    "vocab_size", "batch_size", "epochs", "records_per_dataset"):
+            print(key + ":", getattr(args, key, getattr(profile, key)))
+        print("tokenizer:", profile.tokenizer)
+        print("checkpoint:", profile.checkpoint)
+        print("retrieval index:", profile.retrieval)
+        print("bundle manifest:", "model_store/manifests/ikon-" + profile.name + "-bundle.json")
+        print("Dry run: no model files or GPU were modified")
+        return
 
     enter_project_root()
     python = sys.executable
@@ -340,6 +361,8 @@ def main():
             str(tools / "train_tokenizer.py"),
             "--records-per-dataset",
             str(args.tokenizer_records_per_dataset),
+            "--vocab-size", str(profile.vocab_size),
+            "--output", profile.tokenizer,
         ])
 
     # 5. Train the real model with live progress + checkpoints.
@@ -355,6 +378,13 @@ def main():
         str(args.batch_size),
         "--sequence-length",
         str(args.sequence_length),
+        "--tokenizer", profile.tokenizer,
+        "--output", profile.checkpoint,
+        "--training-log", profile.checkpoint.replace(".lbckpt", "-training.jsonl"),
+        "--d-model", str(profile.d_model),
+        "--layers", str(profile.layers),
+        "--heads", str(profile.heads),
+        "--d-ff", str(profile.d_ff),
         "--device",
         args.device,
         "--cuda-device-index",
@@ -379,18 +409,26 @@ def main():
     if args.skip_retrieval:
         print("[SKIP] Retrieval build skipped by --skip-retrieval")
     else:
-        run([python, str(tools / "build_retrieval.py")])
+        rag_chunk_chars = 1000 if args.profile == "legacy" else (320 if args.profile == "p5000-512" else 600)
+        rag_overlap = 150 if args.profile == "legacy" else (48 if args.profile == "p5000-512" else 90)
+        run([python, str(tools / "build_retrieval.py"),
+             "--tokenizer", profile.tokenizer, "--output", profile.retrieval,
+             "--max-chars", str(rag_chunk_chars),
+             "--overlap-chars", str(rag_overlap)])
 
-    # 7. Verify all outputs.
-    if not args.skip_retrieval:
-        verify_artifacts()
+    # 7. Verify all outputs and real-load the complete saved bundle.
+    # Even if a stage was skipped, its compatible artifact must exist.
+    verify_artifacts(profile)
+    banner("STEP: Verify checkpoint/tokenizer/RAG and publish bundle manifest")
+    run([python, str(tools / "finalize_pipeline.py"), "--profile", args.profile])
 
     banner("SireSoft-IKON REAL PIPELINE COMPLETE")
-    print("Tokenizer: model_store/manifests/sirellm_tokenizer.sltok")
-    print("Model: model_store/checkpoints/sirellm-v1.lbckpt")
-    print("Resume state: model_store/checkpoints/sirellm-v1-progress.lbckpt")
-    print("Training metrics: model_store/checkpoints/sirellm-v1-training.jsonl")
-    print("Retrieval: vector_store/indexes/siresoft.slretr")
+    print("Tokenizer:", profile.tokenizer)
+    print("Model:", profile.checkpoint)
+    print("Resume state:", profile.checkpoint.replace(".lbckpt", "-progress.lbckpt"))
+    print("Training metrics:", profile.checkpoint.replace(".lbckpt", "-training.jsonl"))
+    print("Retrieval:", profile.retrieval)
+    print("Bundle manifest:", "model_store/manifests/ikon-" + profile.name + "-bundle.json")
     print()
     print("RAG CLI: python tools/chat_rag.py")
     print("GPU test: python tools/test_gpu_training.py --arch sm_61 --require-cuda")
@@ -398,7 +436,12 @@ def main():
 
     if args.start_app:
         banner("STEP: Starting application")
-        run([python, str(ROOT / "app.py")])
+        launch = [python, str(ROOT / "app.py"), "--model-profile", args.profile, "--require-model"]
+        if args.device == "cuda":
+            launch.append("--gpu")
+        elif args.device == "cpu":
+            launch.extend(["--device", "cpu"])
+        run(launch)
 
 
 if __name__ == "__main__":

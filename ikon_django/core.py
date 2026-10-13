@@ -43,7 +43,7 @@ DEFAULT_RETRIEVAL = os.getenv(
 HOST = os.getenv("SIRELLM_HOST", "127.0.0.1")
 PORT = int(os.getenv("SIRELLM_PORT", "8000"))
 DEFAULT_MAX_NEW_TOKENS = int(
-    os.getenv("SIRELLM_MAX_NEW_TOKENS", "32")
+    os.getenv("SIRELLM_MAX_NEW_TOKENS", "128")
 )
 
 
@@ -241,9 +241,14 @@ def _run_rag_frontend_chat(request: FrontendChatRequest) -> dict[str, Any]:
     orchestrator = stack["orchestrator"]
     eos_id, pad_id = _special_token_ids(tokenizer_manager)
 
+    # Reserve enough prompt budget for the existing 64-token checkpoint.
+    model = getattr(getattr(stack["inference"], "loaded", None), "model", None)
+    window = getattr(model, "max_seq_len", 512)
+    output_budget = min(DEFAULT_MAX_NEW_TOKENS, max(1, window // 8)) if window <= 128 else min(DEFAULT_MAX_NEW_TOKENS, max(1, window // 4))
+
     result = orchestrator.answer(
         query_text=query,
-        max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
+        max_new_tokens=output_budget,
         candidate_k=20,
         top_k=5,
         use_mmr=True,
@@ -275,12 +280,35 @@ def _run_base_frontend_chat(request: FrontendChatRequest) -> dict[str, Any]:
     tokenizer = tokenizer_manager.tokenizer
     eos_id, pad_id = _special_token_ids(tokenizer_manager)
 
+    model = getattr(getattr(inference, "loaded", None), "model", None)
+    window = getattr(model, "max_seq_len", 512)
+    output_budget = min(DEFAULT_MAX_NEW_TOKENS, max(1, window // 8)) if window <= 128 else min(DEFAULT_MAX_NEW_TOKENS, max(1, window // 4))
     prompt = _base_prompt(request.messages)
     prompt_ids = tokenizer.encode(prompt)
+    max_prompt = window - output_budget
+    if len(prompt_ids) > max_prompt:
+        # Keep the newest conversation turns without cutting tokens through
+        # user boundaries. When the newest user message is itself too large,
+        # the runtime's explicit truncation below is the last resort.
+        latest = [m for m in request.messages if m.role == "user" and m.content.strip()]
+        if latest:
+            for begin in range(len(request.messages) - 1, -1, -1):
+                if request.messages[begin] is latest[-1]:
+                    break
+            recent = request.messages[begin:]
+            for index in range(begin - 1, -1, -1):
+                candidate = request.messages[index:begin] + recent
+                if len(tokenizer.encode(_base_prompt(candidate))) <= max_prompt:
+                    recent = candidate
+                else:
+                    break
+            bounded = tokenizer.encode(_base_prompt(recent))
+            if len(bounded) <= max_prompt:
+                prompt_ids = bounded
 
     result = inference.generate(
         prompt_ids=prompt_ids,
-        max_new_tokens=DEFAULT_MAX_NEW_TOKENS,
+        max_new_tokens=output_budget,
         eos_token_ids=[eos_id],
         sampler="greedy",
         seed=1337,
@@ -326,3 +354,18 @@ def ensure_stack_loading():
         _loader_started = True
     _start_stack_loader()
 
+
+
+def compute_status():
+    """Actual model compute mode (not merely the requested environment value)."""
+    with _stack_lock:
+        namespace = _stack.get("namespace")
+    backend = namespace.get("GPU_BACKEND") if isinstance(namespace, dict) else None
+    if backend is None:
+        return {"requested": os.getenv("SIREIKON_DEVICE", "auto"), "active": "unknown", "calls": 0}
+    status = backend.status()
+    return {
+        "requested": status.get("requested", "auto"),
+        "active": status.get("active", "unknown"),
+        "calls": sum(int(v) for v in status.get("calls", {}).values()),
+    }

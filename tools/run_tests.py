@@ -18,6 +18,12 @@ from real_runtime import ROOT, enter_project_root
 QUICK_TESTS = (
     "tests/test_django_contract.py",
     "tests/test_django_http.py",
+    "tests/test_unified_app.py",
+    "tests/test_model_profiles.py",
+    "tests/test_profile_pipeline.py",
+    "tests/test_pipeline_finalization.py",
+    "tests/test_conversation_budgets.py",
+    "tests/test_compact_rag.py",
     "tests/test_frontend_api.py",
     "tests/test_gpu_backend_contract.py",
     "tools/test_compute_backend.py",
@@ -32,11 +38,14 @@ QUICK_TESTS = (
 
 def discover_tests():
     result = []
+    ignored = {".venv", "venv", "env", "ENV", "node_modules", ".git", "dist", "build", ".vite"}
     for path in ROOT.rglob("test*.py"):
         relative = path.relative_to(ROOT).as_posix()
-        if relative == "tools/run_tests.py":
+        if relative in ("tools/run_tests.py", "tools/test_live_app.py"):
+            # The live browser/API smoke test requires a running server and
+            # real production artifacts. Run it explicitly after deployment.
             continue
-        if "__pycache__" in path.parts:
+        if "__pycache__" in path.parts or any(part in ignored for part in path.relative_to(ROOT).parts):
             continue
         result.append(relative)
     return sorted(result)

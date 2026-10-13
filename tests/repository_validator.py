@@ -154,8 +154,16 @@ class RepositoryValidator:
         }
 
     def validate_python_imports(self):
+        ignored = {
+            ".venv", "venv", "env", "ENV", "node_modules",
+            "__pycache__", ".git", "dist", "build", ".vite",
+        }
         python_files = sorted(
-            self.root.rglob("*.py")
+            path for path in self.root.rglob("*.py")
+            if not any(
+                part in ignored
+                for part in path.relative_to(self.root).parts
+            )
         )
 
         stdlib = set(
